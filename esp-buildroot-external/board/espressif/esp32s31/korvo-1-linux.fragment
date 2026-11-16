@@ -1,0 +1,29 @@
+# Korvo-1 peripherals supported by the current Linux 6.18 driver set.
+CONFIG_INPUT=y
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_TOUCHSCREEN=y
+CONFIG_TOUCHSCREEN_GOODIX=y
+
+# USB Type-A host: keyboards, mass-storage devices, UVC webcams and the
+# ESP-Hosted-Linux USB transport when a second ESP32-S31 is attached.
+CONFIG_USB_HID=y
+CONFIG_HID_GENERIC=y
+CONFIG_USB_STORAGE=y
+CONFIG_SCSI=y
+CONFIG_BLK_DEV_SD=y
+CONFIG_MEDIA_SUPPORT=y
+CONFIG_MEDIA_SUPPORT_FILTER=y
+CONFIG_MEDIA_CAMERA_SUPPORT=y
+CONFIG_MEDIA_ANALOG_TV_SUPPORT=n
+CONFIG_MEDIA_DIGITAL_TV_SUPPORT=n
+CONFIG_MEDIA_RADIO_SUPPORT=n
+CONFIG_MEDIA_SDR_SUPPORT=n
+CONFIG_MEDIA_PLATFORM_SUPPORT=n
+CONFIG_MEDIA_TEST_SUPPORT=n
+CONFIG_MEDIA_USB_SUPPORT=y
+CONFIG_USB_VIDEO_CLASS=y
+
+# Linux radio frameworks required by ESP-Hosted-Linux Wi-Fi and Bluetooth.
+# The Korvo's integrated radio is not directly driven by the current BSP.
+CONFIG_CFG80211=y
+CONFIG_BT=y

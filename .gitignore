@@ -1,0 +1,9 @@
+# Build output and local environment
+/build/
+*.log
+*.tmp
+.config
+/output/
+# Local credentials
+.env
+.env.*

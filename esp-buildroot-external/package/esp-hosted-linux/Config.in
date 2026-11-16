@@ -1,0 +1,13 @@
+config BR2_PACKAGE_ESP_HOSTED_LINUX
+	bool "ESP-Hosted-Linux USB driver (ESP32-S31 radio coprocessor)"
+	depends on BR2_LINUX_KERNEL
+	select BR2_PACKAGE_KMOD
+	select BR2_PACKAGE_KMOD_TOOLS
+	select BR2_PACKAGE_IW
+	select BR2_PACKAGE_WPA_SUPPLICANT
+	select BR2_PACKAGE_WPA_SUPPLICANT_NL80211
+	help
+	  Build Espressif's USB host transport, Wi-Fi and Bluetooth HCI kernel
+	  driver plus Wi-Fi tools for a separate ESP32-S31 connected to this board's
+	  USB host port. The Korvo-1's integrated radio is not directly exposed as
+	  a Linux WLAN/HCI device by the current esp-linux-bsp kernel.

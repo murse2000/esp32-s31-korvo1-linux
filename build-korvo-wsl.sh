@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# WSL appends Windows PATH entries; Buildroot rejects paths containing spaces.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+project_source="${1:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
+work="${HOME}/esp32s31-korvo"
+reference="${HOME}/esp32-s31-linux-reference"
+idf_path="${HOME}/esp/esp-idf"
+ref_commit="e27b61feb92bc0a6d734c8e5cdb0b6af421c9817"
+
+mkdir -p "$work"
+if [[ ! -d "$reference/.git" ]]; then
+    git clone --depth 1 --recurse-submodules https://github.com/annoyedmilk/esp32-s31-linux.git "$reference"
+fi
+if ! grep -q 'integrated Hart-0 radio' "$reference/br2-external/board/esp32s31/defconfig/korvo1.fragment" 2>/dev/null; then
+    git -C "$reference" fetch --depth 1 origin "$ref_commit"
+    git -C "$reference" checkout --detach "$ref_commit"
+    git -C "$reference" submodule update --init --recursive
+    git -C "$reference" apply "$project_source/korvo1-nor-reference.patch"
+fi
+
+git -C "$reference" submodule update --init --recursive
+if ! grep -q 'HOST_UTIL_LINUX_AUTORECONF = NO' "$reference/external/buildroot/package/util-linux/util-linux.mk"; then
+    git -C "$reference/external/buildroot" apply "$project_source/buildroot-host-util-linux-fix.patch"
+fi
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
+
+export IDF_PATH="$idf_path"
+if [[ ! -x "$IDF_PATH/tools/idf.py" ]] || \
+   ! compgen -G "$HOME/.espressif/tools/riscv32-esp-elf/esp-*/riscv32-esp-elf/bin/riscv32-esp-elf-gcc" >/dev/null; then
+    cd "$reference"
+    IDF_PATH="$IDF_PATH" scripts/ci-setup.sh
+fi
+
+export HOSTCC=/usr/bin/gcc-14 HOSTCXX=/usr/bin/g++-14
+cd "$reference"
+BOARD=korvo1 IDF_PATH="$IDF_PATH" BR_JOBS="${BR_JOBS:-8}" \
+    BR_OUTPUT="$reference/build/br-output-korvo1" \
+    BR_DL_DIR="$reference/build/br-dl" scripts/ci-build.sh
+
+python_env="$(find "$HOME/.espressif/python_env" -mindepth 3 -maxdepth 3 -type f -path '*/bin/python' | sort | tail -1)"
+[[ -x "$python_env" ]] || { echo 'ESP-IDF Python environment not found' >&2; exit 1; }
+flash_args=( $(make -s flash-args BOARD=korvo1) )
+out_dir="$project_source/build-output"
+mkdir -p "$out_dir"
+"$python_env" -m esptool --chip esp32s31 merge-bin \
+    --format raw --flash-mode dio --flash-freq 80m --flash-size 16MB \
+    --pad-to-size 16MB -o "$out_dir/korvo1-flash.bin" "${flash_args[@]}"
+cp build/korvo1/rootfs.squashfs "$out_dir/korvo1-rootfs.squashfs"
+cp build/korvo1/Image "$out_dir/korvo1-linux-Image"
+cp bootloader/partitions-korvo1.csv "$out_dir/korvo1-partitions.csv"
+
+printf '\nFlash image: %s/korvo1-flash.bin\nRootfs: %s/korvo1-rootfs.squashfs\n' "$out_dir" "$out_dir"
+if [[ -n "${FLASH_PORT:-}" ]]; then
+    "$python_env" -m esptool --chip esp32s31 -p "$FLASH_PORT" -b 921600 \
+        write-flash 0x0 "$out_dir/korvo1-flash.bin"
+fi

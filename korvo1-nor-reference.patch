@@ -1,0 +1,407 @@
+diff --git a/bootloader/partitions-korvo1.csv b/bootloader/partitions-korvo1.csv
+index 4dbfa48..e6a8791 100644
+--- a/bootloader/partitions-korvo1.csv
++++ b/bootloader/partitions-korvo1.csv
+@@ -1,7 +1,8 @@
+-# ESP32-S31-Korvo-1: the root is on the microSD card.
+-# Name,   Type, SubType, Offset,   Size,      Flags
+-nvs,      data, nvs,     0x11000,  0x6000,
+-phy_init, data, phy,     0x19000,  0x1000,
+-factory,  app,  factory, 0x20000,  0x200000,
+-opensbi,  data, 0x40,    0x220000, 0x80000,
+-linux,    data, 0x40,    0x2A0000, 0x780000,
++# Name, Type, SubType, Offset, Size, Flags
++nvs, data, nvs, 0x9000, 0x6000,
++phy_init, data, phy, 0xf000, 0x1000,
++factory, app, factory, 0x20000, 0x1A0000,
++opensbi, data, 0x40, 0x1C0000, 0x30000,
++linux, data, 0x40, 0x1F0000, 0x4C0000,
++rootfs, data, 0x40, 0x6B0000, 0x7F0000,
++data, data, 0x40, 0xEA0000, 0x160000,
+diff --git a/br2-external/board/esp32s31/defconfig/common.fragment b/br2-external/board/esp32s31/defconfig/common.fragment
+index 6fc7ced..d85d3e2 100644
+--- a/br2-external/board/esp32s31/defconfig/common.fragment
++++ b/br2-external/board/esp32s31/defconfig/common.fragment
+@@ -64,12 +64,6 @@ BR2_PACKAGE_BLE_HA=y
+ BR2_PACKAGE_DROPBEAR=y
+ # Dropbear has no SFTP server.  scp of OpenSSH 9 and sftp need one.
+ BR2_PACKAGE_GESFTPSERVER=y
+-BR2_PACKAGE_IPERF3=y
+-BR2_PACKAGE_LIBCURL=y
+-BR2_PACKAGE_LIBCURL_CURL=y
+-# HTTP, HTTPS and FTP only: no DICT, Gopher, IMAP, POP3, RTSP, SMB, SMTP,
+-# Telnet or TFTP.
+-# BR2_PACKAGE_LIBCURL_EXTRA_PROTOCOLS_FEATURES is not set
+ BR2_PACKAGE_OPENSSL=y
+ # OpenSSL for WPA2/WPA3 Personal and Enterprise (eduroam) and HTTPS.
+ # MSCHAPv2 needs MD4 and DES, and WPA/TKIP group keys need RC4: with
+diff --git a/br2-external/board/esp32s31/defconfig/diskroot.fragment b/br2-external/board/esp32s31/defconfig/diskroot.fragment
+index effb28f..c06389d 100644
+--- a/br2-external/board/esp32s31/defconfig/diskroot.fragment
++++ b/br2-external/board/esp32s31/defconfig/diskroot.fragment
+@@ -57,3 +57,12 @@ BR2_PACKAGE_MOSQUITTO=y
+ # The BlueZ tools and the deprecated ones (hciconfig, hcitool, hcidump).
+ BR2_PACKAGE_BLUEZ5_UTILS_TOOLS=y
+ BR2_PACKAGE_BLUEZ5_UTILS_DEPRECATED=y
++
++# Full-size removable-root builds include the extra console and network tools.
++BR2_PACKAGE_TMUX=y
++BR2_PACKAGE_IPERF3=y
++
++# Network transfer utilities for disk-root boards.
++BR2_PACKAGE_LIBCURL=y
++BR2_PACKAGE_LIBCURL_CURL=y
++# BR2_PACKAGE_LIBCURL_EXTRA_PROTOCOLS_FEATURES is not set
+diff --git a/br2-external/board/esp32s31/defconfig/korvo1.fragment b/br2-external/board/esp32s31/defconfig/korvo1.fragment
+index 78ed4a3..63fcebf 100644
+--- a/br2-external/board/esp32s31/defconfig/korvo1.fragment
++++ b/br2-external/board/esp32s31/defconfig/korvo1.fragment
+@@ -1,17 +1,10 @@
+-# ESP32-S31-Korvo-1, with the ESP32-S31-WROOM-3-N16R16V module: root on the
+-# microSD card (diskroot.fragment), and the LCD with its touch controller.
+-#
+-# The firewall and Thread of the disk boards, the USB stick mount, then the
+-# examples.
+-BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-diskroot $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-usb $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-korvo1 $(BR2_EXTERNAL_ESP32S31_PATH)/../local-overlay"
+-# A login on the panel.
++# ESP32-S31-Korvo-1: integrated Hart-0 radio, LCD console, touch and USB host.
++# The root and persistent overlay are in the 16 MiB NOR flash.
++BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-flashroot $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-usb $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-korvo1 $(BR2_EXTERNAL_ESP32S31_PATH)/../local-overlay"
+ BR2_ROOTFS_POST_SCRIPT_ARGS="tty1"
+-# The mouse on the panel console.
+-BR2_PACKAGE_GPM=y
+-# A desktop for the panel and a USB keyboard (the US keymap of the kernel):
+-# tmux from diskroot.fragment with a status bar, and a chat client for it.
+-# The web browser is links of diskroot.fragment.
+-BR2_PACKAGE_IRSSI=y
+-# evtest for the touch controller.  BusyBox has i2cdetect, i2cget and
+-# i2ctransfer.
++BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/linux-flashroot-korvo1.fragment"
++# Trim optional packages so the flash root fits with the radio and Korvo devices.
++# BR2_PACKAGE_TMUX is not set
++# BR2_PACKAGE_GPM is not set
++# BR2_PACKAGE_IPERF3 is not set
+ BR2_PACKAGE_EVTEST=y
+diff --git a/br2-external/board/esp32s31/linux-flashroot-korvo1.fragment b/br2-external/board/esp32s31/linux-flashroot-korvo1.fragment
+new file mode 100644
+index 0000000..4ec1f49
+--- /dev/null
++++ b/br2-external/board/esp32s31/linux-flashroot-korvo1.fragment
+@@ -0,0 +1,21 @@
++# Korvo-1 peripherals with the flash root of linux-esp32s31.fragment.
++CONFIG_BUILTIN_DTB_NAME="espressif/esp32s31_korvo1"
++CONFIG_CMDLINE="earlycon=sbi console=ttyS0,115200 esp32_shm.radio_service=bt+154 root=/dev/mtdblock0 rootfstype=squashfs ro rootwait init=/sbin/overlay-init"
++CONFIG_MTD=y
++CONFIG_MTD_BLOCK=y
++CONFIG_MTD_UBI=y
++CONFIG_SQUASHFS=y
++CONFIG_SQUASHFS_ZSTD=y
++CONFIG_SQUASHFS_FRAGMENT_CACHE_SIZE=1
++# CONFIG_SQUASHFS_ZLIB is not set
++CONFIG_UBIFS_FS=y
++CONFIG_UBIFS_FS_ADVANCED_COMPR=y
++# CONFIG_UBIFS_FS_ZLIB is not set
++# CONFIG_UBIFS_FS_ZSTD is not set
++CONFIG_OVERLAY_FS=y
++
++# USB host keeps HID and mass storage; do not install USB Ethernet drivers.
++# CONFIG_USB_NET_DRIVERS is not set
++# CONFIG_WIREGUARD is not set
++# CONFIG_NET_SELFTESTS is not set
++# CONFIG_EXFAT_FS is not set
+diff --git a/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/motd b/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/motd
+index 25830bf..86938c5 100644
+--- a/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/motd
++++ b/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/motd
+@@ -13,10 +13,9 @@ VPN       WireGuard: /usr/share/examples/wg-setup.sh, /etc/default/wireguard
+ MQTT      mosquitto_pub, mosquitto_sub; /etc/default/mqtt, mqtt-report.sh
+ Firewall  nft list ruleset; open a port until the next boot:
+           nft insert rule inet filter input tcp dport 8080 accept
+-Desktop   tmux on the panel: Ctrl-b c new window, Ctrl-b n next window,
+-          Ctrl-b % and Ctrl-b " split, Ctrl-b d log out
++Console   LCD console on tty1; touch and USB input events via evtest
+ System    htop, free, df -h, ncdu, dmesg
+-Network   ssh, scp, curl, links, irssi, iperf3, tcpdump
++Network   ssh, scp
+ Files     nnn, tree; /mnt/sd is the FAT partition of the card
+           /mnt/usb is the FAT or exFAT of a USB stick
+ Code      micropython, lua, vim, nano, sqlite3, bc, gdbserver, strace
+diff --git a/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/profile.d/desk.sh b/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/profile.d/desk.sh
+index 339d8ac..4c1d56d 100644
+--- a/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/profile.d/desk.sh
++++ b/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/profile.d/desk.sh
+@@ -1,10 +1,5 @@
+-# SPDX-License-Identifier: MIT
+-# The desktop on the panel: the login on tty1 starts tmux, and its first
+-# window shows the motd with the tools.  The next login attaches to the same
+-# session, so its windows stay.  Without tmux, or when it fails, the login
+-# stays a usual shell.  Kernel messages then go to tty2 (Alt-F2), not over
+-# the desktop; the open allocates tty2, else the kernel ignores the redirect.
+-if [ "$(tty)" = /dev/tty1 ] && [ -z "$TMUX" ] && command -v tmux >/dev/null; then
+-	: </dev/tty2 && setlogcons 2
+-	tmux new-session -A -s desk "cat /etc/motd; exec $SHELL -l" && exit
++#!/bin/sh
++# Keep the Korvo-1 LCD console interactive without the optional tmux binary.
++if [ "not a tty" = /dev/tty1 ]; then
++	cat /etc/motd
+ fi
+diff --git a/br2-external/configs/coreboard1_defconfig b/br2-external/configs/coreboard1_defconfig
+index 38282ae..73d9995 100644
+--- a/br2-external/configs/coreboard1_defconfig
++++ b/br2-external/configs/coreboard1_defconfig
+@@ -66,12 +66,6 @@ BR2_PACKAGE_BLE_HA=y
+ BR2_PACKAGE_DROPBEAR=y
+ # Dropbear has no SFTP server.  scp of OpenSSH 9 and sftp need one.
+ BR2_PACKAGE_GESFTPSERVER=y
+-BR2_PACKAGE_IPERF3=y
+-BR2_PACKAGE_LIBCURL=y
+-BR2_PACKAGE_LIBCURL_CURL=y
+-# HTTP, HTTPS and FTP only: no DICT, Gopher, IMAP, POP3, RTSP, SMB, SMTP,
+-# Telnet or TFTP.
+-# BR2_PACKAGE_LIBCURL_EXTRA_PROTOCOLS_FEATURES is not set
+ BR2_PACKAGE_OPENSSL=y
+ # OpenSSL for WPA2/WPA3 Personal and Enterprise (eduroam) and HTTPS.
+ # MSCHAPv2 needs MD4 and DES, and WPA/TKIP group keys need RC4: with
+@@ -183,6 +177,15 @@ BR2_PACKAGE_MOSQUITTO=y
+ # The BlueZ tools and the deprecated ones (hciconfig, hcitool, hcidump).
+ BR2_PACKAGE_BLUEZ5_UTILS_TOOLS=y
+ BR2_PACKAGE_BLUEZ5_UTILS_DEPRECATED=y
++
++# Full-size removable-root builds include the extra console and network tools.
++BR2_PACKAGE_TMUX=y
++BR2_PACKAGE_IPERF3=y
++
++# Network transfer utilities for disk-root boards.
++BR2_PACKAGE_LIBCURL=y
++BR2_PACKAGE_LIBCURL_CURL=y
++# BR2_PACKAGE_LIBCURL_EXTRA_PROTOCOLS_FEATURES is not set
+ # ESP32-S31-Function-CoreBoard-1: root on a USB stick (diskroot.fragment),
+ # and in the kernel Ethernet and no panel.
+ #
+diff --git a/br2-external/configs/esp32s31_defconfig b/br2-external/configs/esp32s31_defconfig
+index bc6614d..e15bc8a 100644
+--- a/br2-external/configs/esp32s31_defconfig
++++ b/br2-external/configs/esp32s31_defconfig
+@@ -66,12 +66,6 @@ BR2_PACKAGE_BLE_HA=y
+ BR2_PACKAGE_DROPBEAR=y
+ # Dropbear has no SFTP server.  scp of OpenSSH 9 and sftp need one.
+ BR2_PACKAGE_GESFTPSERVER=y
+-BR2_PACKAGE_IPERF3=y
+-BR2_PACKAGE_LIBCURL=y
+-BR2_PACKAGE_LIBCURL_CURL=y
+-# HTTP, HTTPS and FTP only: no DICT, Gopher, IMAP, POP3, RTSP, SMB, SMTP,
+-# Telnet or TFTP.
+-# BR2_PACKAGE_LIBCURL_EXTRA_PROTOCOLS_FEATURES is not set
+ BR2_PACKAGE_OPENSSL=y
+ # OpenSSL for WPA2/WPA3 Personal and Enterprise (eduroam) and HTTPS.
+ # MSCHAPv2 needs MD4 and DES, and WPA/TKIP group keys need RC4: with
+diff --git a/br2-external/configs/korvo1_defconfig b/br2-external/configs/korvo1_defconfig
+index 3e600a2..4cdc48a 100644
+--- a/br2-external/configs/korvo1_defconfig
++++ b/br2-external/configs/korvo1_defconfig
+@@ -1,5 +1,5 @@
+ # Generated by scripts/mkdefconfigs.sh.  Do not edit: change
+-# common.fragment, diskroot.fragment and korvo1.fragment in br2-external/board/esp32s31/defconfig/.
++# common.fragment, flashroot.fragment and korvo1.fragment in br2-external/board/esp32s31/defconfig/.
+ # The common base of the three builds: toolchain, kernel, system, and the
+ # userspace that all three have.  scripts/mkdefconfigs.sh merges it with the
+ # root fragment and the fragment of each board into
+@@ -66,12 +66,6 @@ BR2_PACKAGE_BLE_HA=y
+ BR2_PACKAGE_DROPBEAR=y
+ # Dropbear has no SFTP server.  scp of OpenSSH 9 and sftp need one.
+ BR2_PACKAGE_GESFTPSERVER=y
+-BR2_PACKAGE_IPERF3=y
+-BR2_PACKAGE_LIBCURL=y
+-BR2_PACKAGE_LIBCURL_CURL=y
+-# HTTP, HTTPS and FTP only: no DICT, Gopher, IMAP, POP3, RTSP, SMB, SMTP,
+-# Telnet or TFTP.
+-# BR2_PACKAGE_LIBCURL_EXTRA_PROTOCOLS_FEATURES is not set
+ BR2_PACKAGE_OPENSSL=y
+ # OpenSSL for WPA2/WPA3 Personal and Enterprise (eduroam) and HTTPS.
+ # MSCHAPv2 needs MD4 and DES, and WPA/TKIP group keys need RC4: with
+@@ -124,79 +118,43 @@ BR2_PACKAGE_NFTABLES=y
+ BR2_PACKAGE_MDNSD=y
+ # wg for WireGuard; S42wireguard needs no wg-quick, which is a bash script.
+ BR2_PACKAGE_WIREGUARD_TOOLS=y
+-# The root on a disk, for the boards with one: the microSD card of korvo1
+-# and the USB stick of coreboard1.  The disk has room, so these builds have
+-# the full set of workstation and debugging tools.
+-#
+-# gdbserver needs the C++ runtime.  The full debugger stays in the container.
+-BR2_TOOLCHAIN_BUILDROOT_CXX=y
+-BR2_PACKAGE_HOST_GDB=y
+-BR2_TARGET_ROOTFS_EXT2=y
+-BR2_TARGET_ROOTFS_EXT2_4=y
+-BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
+-BR2_PACKAGE_HOST_GENIMAGE=y
+-
+-# The root is on a removable disk, and a clean shutdown is not certain.
+-BR2_PACKAGE_E2FSPROGS=y
+-# fsck.fat clears the dirty flag of p1 after a reset.  S10sdcard.sh runs it
+-# when the cluster count of p1 fits in the free memory.
+-BR2_PACKAGE_DOSFSTOOLS=y
+-BR2_PACKAGE_DOSFSTOOLS_FSCK_FAT=y
+-BR2_PACKAGE_BASH=y
+-BR2_PACKAGE_COREUTILS=y
+-BR2_PACKAGE_VIM=y
+-BR2_PACKAGE_LESS=y
+-BR2_PACKAGE_FILE=y
+-BR2_PACKAGE_HTOP=y
+-BR2_PACKAGE_FASTFETCH=y
+-# Buildroot and strace 7.1 do not support RV32, so br2-external has a port.
+-BR2_PACKAGE_STRACE_RV32=y
+-BR2_PACKAGE_GDB=y
+-BR2_PACKAGE_TCPDUMP=y
+-# Links needs OpenSSL and the CA certificates for HTTPS after the board
+-# clock is set.
+-BR2_PACKAGE_LINKS=y
+-BR2_PACKAGE_MICROPYTHON=y
+-# Terminal tools, on the console and over SSH: windows, an easy editor, files,
+-# disk use, a calculator and SQLite.
+-BR2_PACKAGE_TMUX=y
+-BR2_PACKAGE_NANO=y
+-BR2_PACKAGE_NNN=y
+-BR2_PACKAGE_NCDU=y
+-BR2_PACKAGE_TREE=y
+-BR2_PACKAGE_BC=y
+-BR2_PACKAGE_SQLITE=y
+-# The time zone database.  /etc/localtime is UTC; ln -sf
+-# /usr/share/zoneinfo/<zone> /etc/localtime sets the local zone.
+-BR2_TARGET_TZ_INFO=y
+-# An access point with all features, next to the AP mode of wpa_supplicant.
+-BR2_PACKAGE_HOSTAPD=y
+-# The Thread host for the IEEE 802.15.4 radio co-processor of the firmware.
+-BR2_PACKAGE_OPENTHREAD=y
+-# The RCP for the OpenThread Border Router app of Home Assistant.
+-BR2_PACKAGE_THREAD_RELAY=y
+-# MQTT clients for Home Assistant: libmosquitto, mosquitto_pub and
+-# mosquitto_sub with TLS.  No broker: it runs on the LAN.  On the module,
+-# the squashfs would be 100 KiB larger than its partition.
+-BR2_PACKAGE_MOSQUITTO=y
+-# BR2_PACKAGE_MOSQUITTO_BROKER is not set
+-# The BlueZ tools and the deprecated ones (hciconfig, hcitool, hcidump).
+-BR2_PACKAGE_BLUEZ5_UTILS_TOOLS=y
+-BR2_PACKAGE_BLUEZ5_UTILS_DEPRECATED=y
+-# ESP32-S31-Korvo-1, with the ESP32-S31-WROOM-3-N16R16V module: root on the
+-# microSD card (diskroot.fragment), and the LCD with its touch controller.
+-#
+-# The firewall and Thread of the disk boards, the USB stick mount, then the
+-# examples.
+-BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-diskroot $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-usb $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-korvo1 $(BR2_EXTERNAL_ESP32S31_PATH)/../local-overlay"
+-# A login on the panel.
++# The root in the flash, for the module alone (esp32s31), which has no
++# disk.  The root is a squashfs, with a UBIFS overlay that keeps all
++# changes (overlay-init).  The flash is small, so these builds are lean.
++# The read-only root on the flash.  Small blocks keep the decompression
++# cache of the kernel small.  zstd with the extreme setting makes the image
++# smaller than gzip, and it decompresses faster than xz.
++BR2_TARGET_ROOTFS_SQUASHFS=y
++BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD=y
++BR2_TARGET_ROOTFS_SQUASHFS_EXTREME_COMP=y
++BR2_TARGET_ROOTFS_SQUASHFS_BS_32K=y
++# flash_erase resets the overlay to the image.  overlay-init needs
++# ubiattach and ubimkvol.  The NOR flash needs no NAND or other UBI tools.
++BR2_PACKAGE_MTD=y
++# BR2_PACKAGE_MTD_FLASH_LOCK is not set
++# BR2_PACKAGE_MTD_FLASH_UNLOCK is not set
++# BR2_PACKAGE_MTD_MTD_DEBUG is not set
++# BR2_PACKAGE_MTD_NANDDUMP is not set
++# BR2_PACKAGE_MTD_NANDTEST is not set
++# BR2_PACKAGE_MTD_NANDWRITE is not set
++# BR2_PACKAGE_MTD_UBIBLOCK is not set
++# BR2_PACKAGE_MTD_UBICRC32 is not set
++# BR2_PACKAGE_MTD_UBIDETACH is not set
++# BR2_PACKAGE_MTD_UBIFORMAT is not set
++# BR2_PACKAGE_MTD_UBIHEALTHD is not set
++# BR2_PACKAGE_MTD_UBINFO is not set
++# BR2_PACKAGE_MTD_UBINIZE is not set
++# BR2_PACKAGE_MTD_UBIRENAME is not set
++# BR2_PACKAGE_MTD_UBIRMVOL is not set
++# BR2_PACKAGE_MTD_UBIRSVOL is not set
++# BR2_PACKAGE_MTD_UBIUPDATEVOL is not set
++# ESP32-S31-Korvo-1: integrated Hart-0 radio, LCD console, touch and USB host.
++# The root and persistent overlay are in the 16 MiB NOR flash.
++BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-flashroot $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-usb $(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/rootfs-overlay-korvo1 $(BR2_EXTERNAL_ESP32S31_PATH)/../local-overlay"
+ BR2_ROOTFS_POST_SCRIPT_ARGS="tty1"
+-# The mouse on the panel console.
+-BR2_PACKAGE_GPM=y
+-# A desktop for the panel and a USB keyboard (the US keymap of the kernel):
+-# tmux from diskroot.fragment with a status bar, and a chat client for it.
+-# The web browser is links of diskroot.fragment.
+-BR2_PACKAGE_IRSSI=y
+-# evtest for the touch controller.  BusyBox has i2cdetect, i2cget and
+-# i2ctransfer.
++BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_ESP32S31_PATH)/board/esp32s31/linux-flashroot-korvo1.fragment"
++# Trim optional packages so the flash root fits with the radio and Korvo devices.
++# BR2_PACKAGE_TMUX is not set
++# BR2_PACKAGE_GPM is not set
++# BR2_PACKAGE_IPERF3 is not set
+ BR2_PACKAGE_EVTEST=y
+diff --git a/linux/arch/riscv/boot/dts/espressif/esp32s31_korvo1.dts b/linux/arch/riscv/boot/dts/espressif/esp32s31_korvo1.dts
+index 8bc8c02..5a1be91 100644
+--- a/linux/arch/riscv/boot/dts/espressif/esp32s31_korvo1.dts
++++ b/linux/arch/riscv/boot/dts/espressif/esp32s31_korvo1.dts
+@@ -137,3 +137,26 @@
+ 		touchscreen-size-y = <480>;
+ 	};
+ };
++
++/* Read-only squashfs and persistent UBIFS overlay, relative to the shared
++ * flash MTD exported by Hart 0; these sizes match partitions-korvo1.csv. */
++&wifi {
++	flash {
++		partitions {
++			compatible = "fixed-partitions";
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			partition@0 {
++				label = "rootfs";
++				reg = <0x0 0x007F0000>;
++				read-only;
++			};
++
++			partition@7f0000 {
++				label = "data";
++				reg = <0x007F0000 0x00160000>;
++			};
++		};
++	};
++};
+diff --git a/scripts/ci-build.sh b/scripts/ci-build.sh
+index 1b0182a..56b038e 100755
+--- a/scripts/ci-build.sh
++++ b/scripts/ci-build.sh
+@@ -19,6 +19,10 @@ cd "$(dirname "$0")/.."
+ : "${BR_OUTPUT:=$PWD/build/br-output-$BOARD}"
+ : "${BR_DL_DIR:=$PWD/build/br-dl}"
+ export IDF_PATH BR2_DL_DIR="$BR_DL_DIR"
++: "${HOSTCC:=/usr/bin/gcc-14}"
++: "${HOSTCXX:=/usr/bin/g++-14}"
++: "${BR_JOBS:=8}"
++export HOSTCC HOSTCXX
+ # post-build.sh writes it into /etc/os-release; the release workflow sets it.
+ ESP32S31_VERSION=$(make -s version)
+ export ESP32S31_VERSION
+@@ -28,7 +32,7 @@ make bootloader BOARD="$BOARD"
+ make opensbi BOARD="$BOARD"
+ 
+ # The same steps as "make rootfs", without the container.
+-br="make -C external/buildroot O=$BR_OUTPUT BR2_EXTERNAL=$PWD/br2-external"
++br="make -C external/buildroot O=$BR_OUTPUT BR2_EXTERNAL=$PWD/br2-external BR2_DL_DIR=$BR_DL_DIR BR2_JLEVEL=$BR_JOBS HOSTCC=$HOSTCC HOSTCXX=$HOSTCXX"
+ $br "${BOARD}_defconfig"
+ $br
+ 
+diff --git a/scripts/mkdefconfigs.sh b/scripts/mkdefconfigs.sh
+index 3cb8e2b..0bf0cb6 100755
+--- a/scripts/mkdefconfigs.sh
++++ b/scripts/mkdefconfigs.sh
+@@ -21,7 +21,7 @@ status=0
+ 
+ for board in korvo1 esp32s31 coreboard1; do
+ 	case $board in
+-	esp32s31) fragments="common flashroot $board" ;;
++	esp32s31|korvo1) fragments="common flashroot $board" ;;
+ 	*) fragments="common diskroot $board" ;;
+ 	esac
+ 	files=$(for f in $fragments; do echo "$frag/$f.fragment"; done)

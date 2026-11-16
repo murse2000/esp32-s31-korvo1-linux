@@ -1,0 +1,34 @@
+diff --git a/package/util-linux/0004-host-build-use-distributed-makefile-in.patch b/package/util-linux/0004-host-build-use-distributed-makefile-in.patch
+new file mode 100644
+index 0000000000..b431c5aa99
+--- /dev/null
++++ b/package/util-linux/0004-host-build-use-distributed-makefile-in.patch
+@@ -0,0 +1,16 @@
++From: Local ESP32-S31 Korvo flash build
++Subject: [PATCH] host-util-linux: avoid fragile host autoreconf
++
++Use the distributed Makefile.in for the host tools.  Keep the pthread
++substitution added to Makefile.am in sync for the host configure path.
++
++---
++a/Makefile.in
+++++ b/Makefile.in
++@@ -7523,5 +7523,6 @@ edit_cmd = sed \
++ 	's|@usrsbin_execdir[@]|$(usrsbin_execdir)|g' -e \
++ 	's|@SOCKET_LIBS[@]|$(SOCKET_LIBS)|g' -e \
+++	's|@PTHREAD_LIBS[@]|$(PTHREAD_LIBS)|g' -e \
++ 	's|@VERSION[@]|$(VERSION)|g' -e \
++ 	's|@ADJTIME_PATH[@]|$(ADJTIME_PATH)|g' -e \
++ 	's|@LIBUUID_VERSION[@]|$(LIBUUID_VERSION)|g' -e \
+diff --git a/package/util-linux/util-linux.mk b/package/util-linux/util-linux.mk
+index 2824d27cc5..ef1c79bcfa 100644
+--- a/package/util-linux/util-linux.mk
++++ b/package/util-linux/util-linux.mk
+@@ -42,6 +42,7 @@ UTIL_LINUX_IGNORE_CVES += CVE-2026-27456
+ 
+ # 0002-autotools-optionally-add-libpthread-to-uuid.pc.patch
+ UTIL_LINUX_AUTORECONF = YES
++HOST_UTIL_LINUX_AUTORECONF = NO
+ 
+ UTIL_LINUX_INSTALL_STAGING = YES
+ UTIL_LINUX_DEPENDENCIES = \
