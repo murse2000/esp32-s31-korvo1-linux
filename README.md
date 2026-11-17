@@ -103,11 +103,11 @@ sha256sum -c SHA256SUMS
 | `phy_init` | `0x00F000` | `0x001000` | RF PHY 초기화 데이터 |
 | `factory` | `0x020000` | `0x1A0000` | Hart 0용 factory/radio firmware 이미지 영역 |
 | `opensbi` | `0x1C0000` | `0x030000` | OpenSBI |
-| `linux` | `0x1F0000` | `0x4C0000` | Hart 1 Linux 이미지 |
-| `rootfs` | `0x6B0000` | `0x7F0000` | 읽기 전용 rootfs |
+| `linux` | `0x1F0000` | `0x4E0000` | Hart 1 Linux 이미지 |
+| `rootfs` | `0x6D0000` | `0x7D0000` | 읽기 전용 rootfs |
 | `data` | `0xEA0000` | `0x160000` | UBI/UBIFS 쓰기 가능 데이터 영역 |
 
-rootfs 이미지는 8,163,328바이트이고 파티션은 8,323,072바이트라서 약 159,744바이트가 남습니다. `tmux`는 약 8.93MiB를 차지하는 것으로 측정되어 rootfs 공간을 초과하므로 최종 구성에서 제외했습니다.
+rootfs 이미지는 8,163,328바이트이고 파티션은 8,192,000바이트라서 28,672바이트가 남습니다. `tmux`는 약 8.93MiB를 차지하는 것으로 측정되어 rootfs 공간을 초과하므로 최종 구성에서 제외했습니다.
 
 ### 보드 플래시
 
@@ -240,7 +240,7 @@ kill "$(cat /run/wpa_supplicant.wlan0.pid)"
 - SquashFS rootfs 마운트 및 UBI/UBIFS 데이터 overlay 초기화
 - Linux에서 `wlan0` 및 Bluetooth `hci0` 등록. Wi-Fi AP 연결과 성능은 이 기록에서 검증하지 않았으며, 사용자가 SSID와 암호를 제공해 직접 연결해야 합니다.
 - 800×480 framebuffer, Goodix GT1151 터치, USB HID 키보드 감지
-- ES8389 코덱의 I²C 드라이버와 ALSA/ASoC 설정을 추가했습니다. 다만 현재 upstream BSP 커널에는 ESP32-S31 I²S CPU-DAI 드라이버가 없어 재생·녹음까지 연결되는 사운드 카드는 아직 만들 수 없습니다. 코덱 바인딩과 실제 입출력은 재빌드 및 보드 검증이 필요합니다.
+- ES8389 코덱 드라이버를 커널에 빌드했습니다. 현재 BSP 커널에는 ESP32-S31 I²S CPU-DAI/사운드 카드 드라이버가 없어 부팅 로그에 `No soundcards found`가 나오며, 재생·녹음은 아직 사용할 수 없습니다. 코덱의 I²C probe도 별도로 확인해야 합니다.
 
 이 목록은 모든 주변 장치가 완전히 동작한다는 보증이 아닙니다. 검증한 구성요소와 아직 확인하지 않은 기능을 구분해 기록합니다.
 
@@ -340,11 +340,11 @@ sha256sum -c SHA256SUMS
 | `phy_init` | `0x00F000` | `0x001000` | RF PHY initialization data |
 | `factory` | `0x020000` | `0x1A0000` | Hart-0 factory/radio firmware image region |
 | `opensbi` | `0x1C0000` | `0x030000` | OpenSBI |
-| `linux` | `0x1F0000` | `0x4C0000` | Hart-1 Linux image |
-| `rootfs` | `0x6B0000` | `0x7F0000` | Read-only root filesystem |
+| `linux` | `0x1F0000` | `0x4E0000` | Hart-1 Linux image |
+| `rootfs` | `0x6D0000` | `0x7D0000` | Read-only root filesystem |
 | `data` | `0xEA0000` | `0x160000` | Writable UBI/UBIFS data area |
 
-The SquashFS image is 8,163,328 bytes in an 8,323,072-byte rootfs partition, leaving 159,744 bytes free. `tmux` was measured at about 8.93 MiB and omitted because it would exceed the remaining rootfs space.
+The SquashFS image is 8,163,328 bytes in an 8,192,000-byte rootfs partition, leaving 28,672 bytes free. `tmux` was measured at about 8.93 MiB and omitted because it would exceed the remaining rootfs space.
 
 ### Flash the board
 
@@ -357,7 +357,7 @@ The SquashFS image is 8,163,328 bytes in an 8,323,072-byte rootfs partition, lea
 .\flash-korvo1.ps1 -Port COM3
 ```
 
-The script defaults to `COM3`, uses 921600 baud, and writes the full image at offset `0x0`. Substitute the actual port if it differs. The Windows Python launcher must provide Python 3.12 with `esptool` installed.
+The script defaults to `COM3` and uses 921600 baud. It updates the partition table, Linux image, and SquashFS rootfs only; it leaves the writable data partition untouched, so Wi-Fi profiles in UBIFS persist. Substitute the actual port if it differs. The Windows Python launcher must provide Python 3.12 with `esptool` installed. `korvo1-flash.bin` remains available for a full-image recovery, which overwrites all 16 MiB including writable data.
 
 The build script can also invoke esptool in its ESP-IDF Python environment when `FLASH_PORT` is set, for example `FLASH_PORT=/dev/ttyUSB0 ./build-korvo-wsl.sh`. USB device forwarding into WSL is environment-dependent; using the Windows PowerShell script is often simpler.
 
@@ -431,7 +431,7 @@ Troubleshooting:
 
 ### Hardware validation and limitations
 
-See [docs/bring-up.md](docs/bring-up.md) for the detailed record. The tested board booted the Hart-0 ESP-Hosted radio firmware NG-1.0.6.0.24 and Hart-1 OpenSBI/Linux 7.3.4, mounted SquashFS, initialized UBI/UBIFS, and detected the 800×480 framebuffer, Goodix GT1151 touch, and USB HID keyboard. `wlan0` and Bluetooth `hci0` registered; association with a Wi-Fi access point was not part of the recorded validation. The ES8389 codec driver and ALSA/ASoC config have now been added to the source patches, but a rebuilt image has not been verified. The upstream BSP currently has no ESP32-S31 I²S CPU-DAI driver, so complete audio playback/capture still needs that driver and an ASoC card link. Camera support remains unavailable in this build.
+See [docs/bring-up.md](docs/bring-up.md) for the detailed record. The tested board booted the Hart-0 ESP-Hosted radio firmware NG-1.0.6.0.24 and Hart-1 OpenSBI/Linux 7.3.4, mounted SquashFS, initialized the UBI/UBIFS overlay, and detected the 800×480 framebuffer, Goodix GT1151 touch, USB HID keyboard and `wlan0`. The `data` MTD partition now reports the intended 0x160000 size, and the shell starts on the overlay root. Bluetooth `hci0` was registered in the earlier bring-up; Wi-Fi AP association was not tested during this update. The ES8389 codec driver is built in, but this image reports `No soundcards found`; the BSP still needs an ESP32-S31 I²S CPU-DAI and ASoC card link for playback/capture. Camera support has not been brought up.
 
 These are observations from the tested configuration, not a guarantee that every peripheral or feature is fully supported.
 

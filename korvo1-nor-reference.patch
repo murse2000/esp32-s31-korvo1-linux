@@ -15,8 +15,8 @@ index 4dbfa48..e6a8791 100644
 +phy_init, data, phy, 0xf000, 0x1000,
 +factory, app, factory, 0x20000, 0x1A0000,
 +opensbi, data, 0x40, 0x1C0000, 0x30000,
-+linux, data, 0x40, 0x1F0000, 0x4C0000,
-+rootfs, data, 0x40, 0x6B0000, 0x7F0000,
++linux, data, 0x40, 0x1F0000, 0x4E0000,
++rootfs, data, 0x40, 0x6D0000, 0x7D0000,
 +data, data, 0x40, 0xEA0000, 0x160000,
 diff --git a/br2-external/board/esp32s31/defconfig/common.fragment b/br2-external/board/esp32s31/defconfig/common.fragment
 index 6fc7ced..d85d3e2 100644
@@ -87,7 +87,7 @@ new file mode 100644
 index 0000000..4ec1f49
 --- /dev/null
 +++ b/br2-external/board/esp32s31/linux-flashroot-korvo1.fragment
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,27 @@
 +# Korvo-1 peripherals with the flash root of linux-esp32s31.fragment.
 +CONFIG_BUILTIN_DTB_NAME="espressif/esp32s31_korvo1"
 +CONFIG_CMDLINE="earlycon=sbi console=ttyS0,115200 esp32_shm.radio_service=bt+154 root=/dev/mtdblock0 rootfstype=squashfs ro rootwait init=/sbin/overlay-init"
@@ -111,6 +111,7 @@ index 0000000..4ec1f49
 +# CONFIG_EXFAT_FS is not set
 +
 +# Everest ES8389 codec on Korvo-1 I2C0 (7-bit address 0x10).
++CONFIG_SOUND=y
 +CONFIG_SND=y
 +CONFIG_SND_SOC=y
 +CONFIG_SND_SOC_ES8389=y
@@ -362,13 +363,13 @@ index 8bc8c02..5a1be91 100644
 +
 +			partition@0 {
 +				label = "rootfs";
-+				reg = <0x0 0x007F0000>;
++				reg = <0x0 0x007D0000>;
 +				read-only;
 +			};
 +
-+			partition@7f0000 {
++			partition@7d0000 {
 +				label = "data";
-+				reg = <0x007F0000 0x00160000>;
++				reg = <0x007D0000 0x00160000>;
 +			};
 +		};
 +	};

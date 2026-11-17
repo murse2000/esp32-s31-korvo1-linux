@@ -21,6 +21,16 @@ if ! grep -q 'integrated Hart-0 radio' "$reference/br2-external/board/esp32s31/d
     git -C "$reference" apply "$project_source/korvo1-nor-reference.patch"
 fi
 
+# Refresh an already-patched checkout too: its previous DTS left the UBI data
+# partition at the old shared-flash offset, so incremental builds must agree
+# with the 16 MiB NOR partition table before Buildroot copies the kernel tree.
+korvo_dts="$reference/linux/arch/riscv/boot/dts/espressif/esp32s31_korvo1.dts"
+sed -i \
+    -e 's/reg = <0x0 0x007F0000>;/reg = <0x0 0x007D0000>;/' \
+    -e 's/partition@7f0000/partition@7d0000/' \
+    -e 's/reg = <0x007F0000 0x00160000>;/reg = <0x007D0000 0x00160000>;/' \
+    "$korvo_dts"
+
 git -C "$reference" submodule update --init --recursive
 if ! grep -q 'HOST_UTIL_LINUX_AUTORECONF = NO' "$reference/external/buildroot/package/util-linux/util-linux.mk"; then
     git -C "$reference/external/buildroot" apply "$project_source/buildroot-host-util-linux-fix.patch"
@@ -48,7 +58,7 @@ BOARD=korvo1 IDF_PATH="$IDF_PATH" BR_JOBS="${BR_JOBS:-8}" \
     BR_OUTPUT="$reference/build/br-output-korvo1" \
     BR_DL_DIR="$reference/build/br-dl" scripts/ci-build.sh
 
-python_env="$(find "$HOME/.espressif/python_env" -mindepth 3 -maxdepth 3 -type f -path '*/bin/python' | sort | tail -1)"
+python_env="$(find "$HOME/.espressif/python_env" -mindepth 3 -maxdepth 3 -executable -path '*/bin/python' | sort | tail -1)"
 [[ -x "$python_env" ]] || { echo 'ESP-IDF Python environment not found' >&2; exit 1; }
 flash_args=( $(make -s flash-args BOARD=korvo1) )
 out_dir="$project_source/build-output"
@@ -58,6 +68,8 @@ mkdir -p "$out_dir"
     --pad-to-size 16MB -o "$out_dir/korvo1-flash.bin" "${flash_args[@]}"
 cp build/korvo1/rootfs.squashfs "$out_dir/korvo1-rootfs.squashfs"
 cp build/korvo1/Image "$out_dir/korvo1-linux-Image"
+cp build/korvo1/linux.size "$out_dir/korvo1-linux-size.bin"
+cp build/korvo1/bootloader/partition_table/partition-table.bin "$out_dir/korvo1-partition-table.bin"
 cp bootloader/partitions-korvo1.csv "$out_dir/korvo1-partitions.csv"
 
 printf '\nFlash image: %s/korvo1-flash.bin\nRootfs: %s/korvo1-rootfs.squashfs\n' "$out_dir" "$out_dir"
