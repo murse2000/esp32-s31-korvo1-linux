@@ -25,12 +25,14 @@ git -C "$reference" submodule update --init --recursive
 if ! grep -q 'HOST_UTIL_LINUX_AUTORECONF = NO' "$reference/external/buildroot/package/util-linux/util-linux.mk"; then
     git -C "$reference/external/buildroot" apply "$project_source/buildroot-host-util-linux-fix.patch"
 fi
-if [[ $EUID -eq 0 ]]; then
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
-else
-    sudo apt-get update
-    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
+if ! command -v gcc-14 >/dev/null || ! command -v g++-14 >/dev/null; then
+    if [[ $EUID -eq 0 ]]; then
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
+    else
+        sudo apt-get update
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
+    fi
 fi
 
 export IDF_PATH="$idf_path"

@@ -87,7 +87,7 @@ new file mode 100644
 index 0000000..4ec1f49
 --- /dev/null
 +++ b/br2-external/board/esp32s31/linux-flashroot-korvo1.fragment
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,26 @@
 +# Korvo-1 peripherals with the flash root of linux-esp32s31.fragment.
 +CONFIG_BUILTIN_DTB_NAME="espressif/esp32s31_korvo1"
 +CONFIG_CMDLINE="earlycon=sbi console=ttyS0,115200 esp32_shm.radio_service=bt+154 root=/dev/mtdblock0 rootfstype=squashfs ro rootwait init=/sbin/overlay-init"
@@ -109,6 +109,11 @@ index 0000000..4ec1f49
 +# CONFIG_WIREGUARD is not set
 +# CONFIG_NET_SELFTESTS is not set
 +# CONFIG_EXFAT_FS is not set
++
++# Everest ES8389 codec on Korvo-1 I2C0 (7-bit address 0x10).
++CONFIG_SND=y
++CONFIG_SND_SOC=y
++CONFIG_SND_SOC_ES8389=y
 diff --git a/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/motd b/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/motd
 index 25830bf..86938c5 100644
 --- a/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/motd
@@ -341,7 +346,7 @@ diff --git a/linux/arch/riscv/boot/dts/espressif/esp32s31_korvo1.dts b/linux/arc
 index 8bc8c02..5a1be91 100644
 --- a/linux/arch/riscv/boot/dts/espressif/esp32s31_korvo1.dts
 +++ b/linux/arch/riscv/boot/dts/espressif/esp32s31_korvo1.dts
-@@ -137,3 +137,26 @@
+@@ -137,3 +137,36 @@
  		touchscreen-size-y = <480>;
  	};
  };
@@ -366,6 +371,16 @@ index 8bc8c02..5a1be91 100644
 +				reg = <0x007F0000 0x00160000>;
 +			};
 +		};
++	};
++};
++
++/* The schematic labels the codec's 8-bit I2C address as 0x20; Linux uses
++ * the corresponding 7-bit address 0x10. The ES8389 has no reset GPIO wired. */
++&i2c0 {
++	es8389: codec@10 {
++		compatible = "everest,es8389";
++		reg = <0x10>;
++		#sound-dai-cells = <0>;
 +	};
 +};
 diff --git a/scripts/ci-build.sh b/scripts/ci-build.sh

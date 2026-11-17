@@ -62,7 +62,7 @@ chmod +x build-korvo-wsl.sh
 
 스크립트는 다음 작업을 수행합니다.
 
-1. Ubuntu에서 `gcc-14`와 `g++-14`를 설치합니다. 일반 WSL 사용자로 실행하면 이 패키지 설치에 `sudo`를 사용합니다.
+1. Ubuntu에 `gcc-14`와 `g++-14`가 없으면 설치합니다. 일반 WSL 사용자로 실행하면 패키지 설치에 `sudo`를 사용합니다.
 2. `annoyedmilk/esp32-s31-linux`의 고정 커밋 `e27b61feb92bc0a6d734c8e5cdb0b6af421c9817`과 하위 모듈을 가져옵니다.
 3. `korvo1-nor-reference.patch`와 `buildroot-host-util-linux-fix.patch`를 적용합니다.
 4. ESP-IDF 설정 스크립트를 실행하고 ESP32-S31용 외부 toolchain 및 빌드 의존 항목을 준비합니다.
@@ -240,7 +240,7 @@ kill "$(cat /run/wpa_supplicant.wlan0.pid)"
 - SquashFS rootfs 마운트 및 UBI/UBIFS 데이터 overlay 초기화
 - Linux에서 `wlan0` 및 Bluetooth `hci0` 등록. Wi-Fi AP 연결과 성능은 이 기록에서 검증하지 않았으며, 사용자가 SSID와 암호를 제공해 직접 연결해야 합니다.
 - 800×480 framebuffer, Goodix GT1151 터치, USB HID 키보드 감지
-- 카메라 및 오디오 드라이버는 현재 빌드에 포함되지 않음
+- ES8389 코덱의 I²C 드라이버와 ALSA/ASoC 설정을 추가했습니다. 다만 현재 upstream BSP 커널에는 ESP32-S31 I²S CPU-DAI 드라이버가 없어 재생·녹음까지 연결되는 사운드 카드는 아직 만들 수 없습니다. 코덱 바인딩과 실제 입출력은 재빌드 및 보드 검증이 필요합니다.
 
 이 목록은 모든 주변 장치가 완전히 동작한다는 보증이 아닙니다. 검증한 구성요소와 아직 확인하지 않은 기능을 구분해 기록합니다.
 
@@ -306,7 +306,7 @@ For a different checkout location, change the `cd` path or pass the repository p
 ./build-korvo-wsl.sh /mnt/c/path/to/esp32-s31-korvo1-linux
 ```
 
-The script installs `gcc-14` and `g++-14` (using `sudo` for package installation when run as a regular user), checks out reference commit `e27b61feb92bc0a6d734c8e5cdb0b6af421c9817` and its submodules, applies the two patches, prepares ESP-IDF/toolchains, builds OpenSBI, Linux and the root filesystem, then assembles a 16 MiB raw image. Generated files are copied to the repository's `build-output/` directory.
+The script installs `gcc-14` and `g++-14` only when missing (using `sudo` for package installation when run as a regular user), checks out reference commit `e27b61feb92bc0a6d734c8e5cdb0b6af421c9817` and its submodules, applies the two patches, prepares ESP-IDF/toolchains, builds OpenSBI, Linux and the root filesystem, then assembles a 16 MiB raw image. Generated files are copied to the repository's `build-output/` directory.
 
 To set build parallelism:
 
@@ -431,7 +431,7 @@ Troubleshooting:
 
 ### Hardware validation and limitations
 
-See [docs/bring-up.md](docs/bring-up.md) for the detailed record. The tested board booted the Hart-0 ESP-Hosted radio firmware NG-1.0.6.0.24 and Hart-1 OpenSBI/Linux 7.3.4, mounted SquashFS, initialized UBI/UBIFS, and detected the 800×480 framebuffer, Goodix GT1151 touch, and USB HID keyboard. `wlan0` and Bluetooth `hci0` registered; association with a Wi-Fi access point was not part of the recorded validation. Camera and audio drivers were not included in this build.
+See [docs/bring-up.md](docs/bring-up.md) for the detailed record. The tested board booted the Hart-0 ESP-Hosted radio firmware NG-1.0.6.0.24 and Hart-1 OpenSBI/Linux 7.3.4, mounted SquashFS, initialized UBI/UBIFS, and detected the 800×480 framebuffer, Goodix GT1151 touch, and USB HID keyboard. `wlan0` and Bluetooth `hci0` registered; association with a Wi-Fi access point was not part of the recorded validation. The ES8389 codec driver and ALSA/ASoC config have now been added to the source patches, but a rebuilt image has not been verified. The upstream BSP currently has no ESP32-S31 I²S CPU-DAI driver, so complete audio playback/capture still needs that driver and an ASoC card link. Camera support remains unavailable in this build.
 
 These are observations from the tested configuration, not a guarantee that every peripheral or feature is fully supported.
 
