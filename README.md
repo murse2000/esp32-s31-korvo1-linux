@@ -157,33 +157,52 @@ iw dev wlan0 scan | grep -E '^(BSS|[[:space:]]*SSID:|[[:space:]]*signal:)'
 
 출력에서 `SSID:` 뒤에 표시되는 이름이 네트워크 이름입니다. 보이지 않는 네트워크이거나 검색 권한/지역 설정 때문에 검색 결과가 없을 수도 있습니다. AP가 5GHz 전용인지, 해당 지역의 채널인지도 확인하세요.
 
-#### 3. WPA/WPA2 개인 네트워크 접속
+#### 3. 여러 Wi-Fi 네트워크 저장 및 자동 접속
 
-보드의 임시 파일 시스템(`/tmp`)에 설정 파일을 만듭니다. 아래의 `내_WiFi_이름`과 `내_WiFi_비밀번호`를 실제 값으로 바꾸세요. 따옴표 안에 큰따옴표나 역슬래시가 있는 SSID/암호는 아래 예제를 그대로 사용할 수 없으므로 별도 이스케이프 처리가 필요합니다.
+이 이미지에는 부팅 시 실행되는 `/etc/init.d/S40wifi`가 포함되어 있습니다. 이 서비스는 `/etc/wpa_supplicant.conf`를 읽어 `wpa_supplicant`를 시작하고 연결을 감시하며 DHCP 주소를 받습니다. 기본 SquashFS는 읽기 전용이지만 `/etc` 변경은 UBIFS overlay에 저장되므로 재부팅 후에도 유지됩니다. 설정을 위해 다시 빌드하거나 플래시할 필요가 없습니다.
+
+기본 설정의 전역 옵션은 보존하고, 아래 `network` 블록을 파일 끝에 추가하세요. 비밀번호는 보드 터미널에서 직접 입력하고 저장소나 채팅에 올리지 마세요.
 
 ```sh
-umask 077
-cat > /tmp/wpa_supplicant.conf <<'EOF'
-ctrl_interface=/var/run/wpa_supplicant
-update_config=0
-country=KR
+cat >> /etc/wpa_supplicant.conf <<'EOF'
 network={
-    ssid="내_WiFi_이름"
-    psk="내_WiFi_비밀번호"
+    ssid="109-0903_WIFI"
+    psk="여기에_비밀번호"
     key_mgmt=WPA-PSK
+    priority=10
 }
 EOF
-chmod 600 /tmp/wpa_supplicant.conf
+chmod 600 /etc/wpa_supplicant.conf
 ```
 
-설정 파일을 지정해 접속을 시작하고 DHCP로 IP 주소를 받습니다.
+두 번째 네트워크도 같은 방식으로 블록을 추가합니다.
 
 ```sh
-wpa_supplicant -B -P /run/wpa_supplicant.wlan0.pid -i wlan0 -c /tmp/wpa_supplicant.conf
-udhcpc -i wlan0
+cat >> /etc/wpa_supplicant.conf <<'EOF'
+network={
+    ssid="두번째_SSID"
+    psk="두번째_비밀번호"
+    key_mgmt=WPA-PSK
+    priority=5
+}
+EOF
+chmod 600 /etc/wpa_supplicant.conf
 ```
 
-`country=KR`은 규제 도메인을 대한민국으로 지정합니다. 보드가 다른 국가에서 작동한다면 실제 사용 국가에 맞게 바꿔야 합니다. 공개 이슈, 로그, 저장소 등에 Wi-Fi 암호를 올리지 마세요. 이 설정은 `/tmp`에만 있으므로 재부팅하면 사라집니다.
+`priority` 숫자가 클수록 우선 연결됩니다. 저장된 네트워크가 여러 개면 `wpa_supplicant`가 주기적으로 주변을 검색하고, 사용할 수 있는 네트워크를 선택하며 연결이 끊기면 재접속을 시도합니다. 별도 반복 검색 스크립트는 필요하지 않습니다. 설정을 바로 적용하려면 다음을 실행하세요.
+
+```sh
+/etc/init.d/S40wifi restart
+```
+
+재부팅 후에는 다음 명령으로 연결과 IP 주소를 확인합니다.
+
+```sh
+iw dev wlan0 link
+ip addr show dev wlan0
+```
+
+앞서 만든 설정이 `/etc/wifi.conf`에만 있다면 자동 접속 서비스가 읽지 않습니다. 해당 파일의 `network` 블록을 `/etc/wpa_supplicant.conf`로 옮기세요. 이미 있는 네트워크 블록은 중복으로 추가하지 마세요. 따옴표나 역슬래시가 포함된 SSID/암호는 별도 이스케이프 처리가 필요합니다.
 
 #### 4. 연결 상태 확인
 
@@ -344,7 +363,7 @@ The build script can also invoke esptool in its ESP-IDF Python environment when 
 
 ### Search for Wi-Fi networks and connect from `wlan0`
 
-The image includes `iw` and `wpa_supplicant`. Run these commands **on the board's Linux console**, which opens a root shell; do not run them in Windows or the WSL build shell.
+The image includes `iw`, `wpa_supplicant`, and a boot service at `/etc/init.d/S40wifi`. It reads `/etc/wpa_supplicant.conf`, starts the supplicant, monitors the link, and obtains a DHCP lease. The base SquashFS is read-only, but changes under `/etc` persist in the UBIFS overlay. No rebuild or reflash is needed. Run these commands **on the board's Linux console**, which opens a root shell.
 
 Check the interface and tools:
 
@@ -369,31 +388,27 @@ iw dev wlan0 scan | grep -E '^(BSS|[[:space:]]*SSID:|[[:space:]]*signal:)'
 
 The SSID appears after `SSID:`. An empty result can mean the interface is down, the network is hidden, or the AP's band/channel is unavailable to the current radio configuration.
 
-For a WPA/WPA2 personal network, create a temporary configuration on the board. Replace the sample network name and password. This simple quoted format does not cover SSIDs/passwords containing quotes or backslashes.
+Append a network block to the existing config so its global options stay in place. Replace the password locally on the board; do not publish it.
 
 ```sh
-umask 077
-cat > /tmp/wpa_supplicant.conf <<'EOF'
-ctrl_interface=/var/run/wpa_supplicant
-update_config=0
-country=KR
+cat >> /etc/wpa_supplicant.conf <<'EOF'
 network={
-    ssid="My-WiFi-SSID"
-    psk="My-WiFi-Password"
+    ssid="109-0903_WIFI"
+    psk="Replace-With-Your-Password"
     key_mgmt=WPA-PSK
+    priority=10
 }
 EOF
-chmod 600 /tmp/wpa_supplicant.conf
+chmod 600 /etc/wpa_supplicant.conf
 ```
 
-Start WPA authentication and request an IP address using DHCP:
+Add one `network` block per saved SSID. Higher `priority` values are preferred. The running `wpa_supplicant` scans periodically, selects an available saved network, and retries after disconnection; no separate scan loop is needed. Apply changes immediately with:
 
 ```sh
-wpa_supplicant -B -P /run/wpa_supplicant.wlan0.pid -i wlan0 -c /tmp/wpa_supplicant.conf
-udhcpc -i wlan0
+/etc/init.d/S40wifi restart
 ```
 
-`country=KR` sets the regulatory country to South Korea; change it to the country where the device is actually operating. Do not publish Wi-Fi credentials in logs, issues, or this repository. The config is stored in `/tmp` and disappears after reboot.
+At boot, `S40wifi` reads the saved config and connects automatically. If the credentials were saved only in `/etc/wifi.conf`, copy the network block into `/etc/wpa_supplicant.conf`; the startup service does not read `/etc/wifi.conf`. Do not append duplicate network blocks. The quoted example needs escaping for SSIDs or passwords containing quotes or backslashes.
 
 Check the association, assigned address, IP connectivity, and DNS:
 
@@ -404,13 +419,7 @@ ping -c 3 1.1.1.1
 ping -c 3 example.com
 ```
 
-To stop the supplicant:
-
-```sh
-kill "$(cat /run/wpa_supplicant.wlan0.pid)"
-```
-
-Repeat the supplicant and DHCP commands after reboot. The current root filesystem is read-only and `/tmp` and `/run` are volatile. Persistent automatic connection requires adding a startup script and a safe credential-storage approach to the rootfs overlay, then rebuilding. Do not commit a real password.
+After reboot, verify the connection with `iw dev wlan0 link` and `ip addr show dev wlan0`. Do not commit a real password.
 
 Troubleshooting:
 
