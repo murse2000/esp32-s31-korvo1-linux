@@ -1,0 +1,52 @@
+From: Marco Müller <hello@annoyedmilk.ch>
+Subject: [PATCH] pinctrl: esp32s31: add the ESP32-S31 pin controller
+
+One driver for the IO MUX, the GPIO matrix and the GPIO registers: they
+share a block.
+
+Upstream: not sent
+---
+diff --git a/drivers/pinctrl/Kconfig b/drivers/pinctrl/Kconfig
+--- a/drivers/pinctrl/Kconfig
++++ b/drivers/pinctrl/Kconfig
+@@ -249,6 +249,29 @@
+ 	  control frameworks. It provides interfaces to setup pin muxing, assign
+ 	  desired pin functions, configure GPIO attributes for LGM SoC pins.
+ 	  Pin muxing and pin config settings are retrieved from device tree.
++
++config PINCTRL_ESP32S31
++	bool "Espressif ESP32-S31 pin controller and GPIO driver"
++	depends on OF
++	depends on SOC_ESP32S31 || COMPILE_TEST
++	depends on GPIOLIB
++	select GENERIC_PINCTRL
++	select GPIOLIB_IRQCHIP
++	default SOC_ESP32S31
++	help
++	  Pin controller and GPIO driver for the Espressif ESP32-S31.  It
++	  sets the IO MUX function, the GPIO matrix signals, the pull and
++	  the drive strength of the 62 pads, and gives them as GPIOs.
++	  Without it, no driver can use a pin, and there are no GPIOs.
++
++config PINCTRL_ESP32S31_GPIOMEM
++	bool "Register access for the pinctrl tool"
++	depends on PINCTRL_ESP32S31
++	default y
++	help
++	  /dev/esp32s31-gpiomem lets root map the IO MUX page and the GPIO
++	  page, and read and write the CNNT select word, for the pinctrl
++	  debug tool.  No other register is reachable through it.
+ 
+ config PINCTRL_EYEQ5
+ 	bool "Mobileye EyeQ5 pinctrl driver"
+diff --git a/drivers/pinctrl/Makefile b/drivers/pinctrl/Makefile
+--- a/drivers/pinctrl/Makefile
++++ b/drivers/pinctrl/Makefile
+@@ -27,6 +27,7 @@
+ obj-$(CONFIG_PINCTRL_EIC7700)	+= pinctrl-eic7700.o
+ obj-$(CONFIG_PINCTRL_EQUILIBRIUM)   += pinctrl-equilibrium.o
+ obj-$(CONFIG_PINCTRL_EP93XX)	+= pinctrl-ep93xx.o
++obj-$(CONFIG_PINCTRL_ESP32S31)	+= pinctrl-esp32s31.o
+ obj-$(CONFIG_PINCTRL_EYEQ5)	+= pinctrl-eyeq5.o
+ obj-$(CONFIG_PINCTRL_GEMINI)	+= pinctrl-gemini.o
+ obj-$(CONFIG_PINCTRL_GENERIC_MUX) += pinctrl-generic-mux.o

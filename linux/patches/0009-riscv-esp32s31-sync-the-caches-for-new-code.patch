@@ -1,0 +1,63 @@
+From: Marco Müller <hello@annoyedmilk.ch>
+Subject: [PATCH] riscv: esp32s31: sync the caches for new code
+
+The I-cache refills from PSRAM, and fence.i does not invalidate it.  Ask
+the firmware to sync, and for a new user page only its folio.
+
+Upstream: not sent
+---
+diff --git a/arch/riscv/include/asm/cacheflush.h b/arch/riscv/include/asm/cacheflush.h
+--- a/arch/riscv/include/asm/cacheflush.h
++++ b/arch/riscv/include/asm/cacheflush.h
+@@ -8,8 +8,19 @@
+ 
+ #include <linux/mm.h>
+ 
++#ifdef CONFIG_ESP32S31_CACHE
++void esp32s31_icache_sync(phys_addr_t paddr, size_t size);
++#endif
++
+ static inline void local_flush_icache_all(void)
+ {
++#ifdef CONFIG_ESP32S31_CACHE
++	/*
++	 * The ESP32-S31 I-cache refills from PSRAM, not from the shared
++	 * D-cache, and fence.i does not invalidate it.
++	 */
++	esp32s31_icache_sync(0, 0);
++#endif
+ 	asm volatile ("fence.i" ::: "memory");
+ }
+ 
+@@ -75,6 +86,19 @@
+ 
+ #endif /* CONFIG_SMP */
+ 
++/* Make the code in a new user page visible. */
++static inline void flush_icache_folio(struct mm_struct *mm,
++				      struct folio *folio)
++{
++#ifdef CONFIG_ESP32S31_CACHE
++	/* Sync only this folio: a sync of the full caches is slow. */
++	esp32s31_icache_sync(PFN_PHYS(folio_pfn(folio)), folio_size(folio));
++	asm volatile ("fence.i" ::: "memory");
++#else
++	flush_icache_mm(mm, false);
++#endif
++}
++
+ /*
+  * RISC-V doesn't have an instruction to flush parts of the instruction cache,
+  * so instead we just flush the whole thing.
+diff --git a/arch/riscv/mm/cacheflush.c b/arch/riscv/mm/cacheflush.c
+--- a/arch/riscv/mm/cacheflush.c
++++ b/arch/riscv/mm/cacheflush.c
+@@ -102,7 +102,7 @@
+ 	struct folio *folio = page_folio(pte_page(pte));
+ 
+ 	if (!test_bit(PG_dcache_clean, &folio->flags.f)) {
+-		flush_icache_mm(mm, false);
++		flush_icache_folio(mm, folio);
+ 		set_bit(PG_dcache_clean, &folio->flags.f);
+ 	}
+ }

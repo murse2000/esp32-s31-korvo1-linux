@@ -1,0 +1,234 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * ESP32-S31-Korvo-1: 800x480 RGB panel, microSD slot, USB 2.0 host port
+ * and a WS2812 RGB LED.
+ * Author: Marco Müller <hello@annoyedmilk.ch>
+ */
+/dts-v1/;
+#include "esp32s31.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "Espressif ESP32-S31-Korvo-1";
+	compatible = "esp,esp32s31-korvo-1", "esp,esp32s31";
+
+	reserved-memory {
+		/* The LCD DMA reads it after the handoff, uncached (PMA). */
+		fb_region: framebuffer@50f40000 {
+			reg = <0x50f40000 0xc0000>;
+			no-map;
+		};
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+
+		/* The panel of the loader; blank with USB Serial/JTAG on. */
+		framebuffer {
+			compatible = "simple-framebuffer";
+			width = <800>;
+			height = <480>;
+			stride = <(800 * 2)>;
+			format = "r5g6b5";
+			memory-region = <&fb_region>;
+		};
+	};
+};
+
+/* No card-detect or write-protect contact, and the root is on the card. */
+&sdmmc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&sd_cfg>;
+	non-removable;
+	status = "okay";
+};
+
+/* The Type-A port: host only, with a TPS2051C switch for VBUS. */
+&usb_phy { status = "okay"; };
+
+&usb0 {
+	dr_mode = "host";
+	disable-over-current;
+	status = "okay";
+};
+
+/* WS2812 RGB LED on GPIO37. */
+&rgb_led {
+	pinctrl-names = "default";
+	pinctrl-0 = <&led_cfg>;
+	status = "okay";
+};
+
+/* The LCD (loader), the card and LED (drivers), the flash, GPIO41, UART0. */
+&pinctrl {
+	gpio-reserved-ranges = <8 31>, <40 2>, <43 3>, <58 2>;
+	/* The nets of the Korvo-1 user guide; the flash pins of the module. */
+	gpio-line-names =
+		/*  0 */ "I2C_SDA", "I2C_SCL", "I2S_MCLK", "I2S_SCLK",
+		/*  4 */ "I2S_LRCLK", "I2S_SDOUT", "I2S_DSIN", "PA_CTRL",
+		/*  8 */ "DB0", "DB1", "DB2", "DB3", "DB4", "DB5", "DB6",
+		/* 15 */ "DB7", "DB8", "DB9", "DB10", "DB11", "SDIO_DATA0",
+		/* 21 */ "SDIO_DATA1", "SDIO_DATA2", "SDIO_DATA3", "SDIO_CLK",
+		/* 25 */ "SDIO_CMD", "SPICS", "SPIQ", "SPIWP", "", "SPIHD",
+		/* 31 */ "SPICLK", "SPID", "DB12", "DB13", "DB14", "DB15",
+		/* 37 */ "WS2812_CTRL", "LCD_CS", "SD_CTRL", "LCD_PCLK", "",
+		/* 42 */ "ADC_BUTTON", "LCD_H_EN", "LCD_H_SYNC", "LCD_V_SYNC",
+		/* 46 */ "CAM_D0", "CAM_D1", "CAM_D2", "CAM_D3", "CAM_D4",
+		/* 51 */ "CAM_D5", "CAM_D6", "CAM_D7", "CAM_PCLK", "CAM_XCLK",
+		/* 56 */ "CAM_V_SYNC", "CAM_H_SYNC", "U0TXD", "U0RXD",
+		/* 60 */ "LCD_MOSI", "LCD_SCK";
+
+	/* The ES8389 feeds the two onboard NS4150B speaker amplifiers. */
+	audio-amplifier-hog {
+		gpio-hog;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "audio-amplifier-enable";
+	};
+
+	/* GPIO39 low switches the power of the microSD slot on. */
+	sd-power-hog {
+		gpio-hog;
+		gpios = <39 GPIO_ACTIVE_LOW>;
+		output-high;
+		line-name = "sd-power";
+	};
+
+	/* The SD host on its IO MUX pins, function 4 */
+	sd_cfg: sd-cfg {
+		sd-clk-pins {
+			pinmux = <ESP32S31_IOMUX(24, 4)>;
+			bias-disable;
+			input-enable;
+			drive-strength = <40>;
+		};
+
+		sd-cmd-data-pins {
+			pinmux = <ESP32S31_IOMUX(20, 4)>,	/* D0 */
+				 <ESP32S31_IOMUX(21, 4)>,	/* D1 */
+				 <ESP32S31_IOMUX(22, 4)>,	/* D2 */
+				 <ESP32S31_IOMUX(23, 4)>,	/* D3 */
+				 <ESP32S31_IOMUX(25, 4)>;	/* CMD */
+			bias-pull-up;
+			input-enable;
+			drive-strength = <40>;
+		};
+	};
+
+	led_cfg: led-cfg {
+		led-pins {
+			pinmux = <ESP32S31_MATRIX_OUT(37, ESP32S31_SIG_RMT_OUT0)>;
+		};
+	};
+
+	i2c0_cfg: i2c0-cfg {
+		i2c0-pins {
+			pinmux = <ESP32S31_MATRIX_INOUT(0, ESP32S31_SIG_I2C0_SDA)>,
+				 <ESP32S31_MATRIX_INOUT(1, ESP32S31_SIG_I2C0_SCL)>;
+			bias-pull-up;
+			drive-open-drain;
+		};
+	};
+};
+
+/* ES8389 codec at 0x10, GT1151 touch at 0x14 (no INT line: polled). */
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_cfg>;
+	clock-frequency = <400000>;
+	status = "okay";
+
+	touchscreen@14 {
+		compatible = "goodix,gt1151";
+		reg = <0x14>;
+		touchscreen-size-x = <800>;
+		touchscreen-size-y = <480>;
+	};
+};
+
+/* Read-only squashfs and persistent UBIFS overlay, relative to the shared
+ * flash MTD exported by Hart 0; these sizes match partitions-korvo1.csv. */
+&wifi {
+	flash {
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "rootfs";
+				reg = <0x0 0x007D0000>;
+				read-only;
+			};
+
+			partition@7d0000 {
+				label = "data";
+				reg = <0x007D0000 0x00160000>;
+			};
+		};
+	};
+};
+
+&i2s0 {
+	pinctrl-0 = <&korvo_i2s_playback>;
+	pinctrl-1 = <&korvo_i2s_capture>;
+};
+
+&pinctrl {
+	korvo_i2s_playback: korvo-i2s-playback {
+		i2s-pins {
+			pinmux = <ESP32S31_MATRIX_OUT(3, 25)>,
+				 <ESP32S31_MATRIX_OUT(4, 27)>,
+				 <ESP32S31_MATRIX_OUT(5, 28)>;
+			drive-strength = <20>;
+		};
+	};
+
+	korvo_i2s_capture: korvo-i2s-capture {
+		i2s-pins {
+			pinmux = <ESP32S31_MATRIX_OUT(3, 25)>,
+				 <ESP32S31_MATRIX_OUT(4, 27)>,
+				 <ESP32S31_MATRIX_IN(6, 28)>;
+			drive-strength = <20>;
+			bias-pull-up;
+			input-enable;
+		};
+	};
+};
+
+
+
+
+
+/* The schematic labels the codec's 8-bit I2C address as 0x20; Linux uses
+ * the corresponding 7-bit address 0x10. The ES8389 has no reset GPIO wired. */
+&i2c0 {
+	es8389: codec@10 {
+		compatible = "everest,es8389";
+		reg = <0x10>;
+		everest,mclk-src = /bits/ 8 <1>;
+		#sound-dai-cells = <0>;
+	};
+};
+
+
+/ {
+	sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "Korvo-1 ES8389";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,bitclock-master = <&sound_cpu>;
+		simple-audio-card,frame-master = <&sound_cpu>;
+		simple-audio-card,widgets = "Speaker", "Speaker", "Microphone", "Mic";
+		simple-audio-card,routing = "Speaker", "HPOL", "Speaker", "HPOR",
+					  "INPUT1", "Mic", "INPUT2", "Mic";
+
+		sound_cpu: simple-audio-card,cpu {
+			sound-dai = <&i2s0>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&es8389>;
+		};
+	};
+};

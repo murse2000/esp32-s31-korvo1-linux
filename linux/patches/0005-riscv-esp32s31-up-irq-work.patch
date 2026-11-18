@@ -1,0 +1,21 @@
+From: Marco Müller <hello@annoyedmilk.ch>
+Subject: [PATCH] riscv: irq_work: use the CLIC software interrupt in UP kernels
+
+Without SMP, RISC-V irq_work has no interrupt.  The ESP32-S31 CLIC gives
+one.
+
+Upstream: not sent
+---
+diff --git a/arch/riscv/include/asm/irq_work.h b/arch/riscv/include/asm/irq_work.h
+--- a/arch/riscv/include/asm/irq_work.h
++++ b/arch/riscv/include/asm/irq_work.h
+@@ -4,7 +4,8 @@
+ 
+ static inline bool arch_irq_work_has_interrupt(void)
+ {
+-	return IS_ENABLED(CONFIG_SMP);
++	/* The ESP32-S31 CLIC has a software interrupt for irq_work in UP. */
++	return IS_ENABLED(CONFIG_SMP) || IS_ENABLED(CONFIG_ESP32S31_CLIC);
+ }
+ 
+ #endif /* _ASM_RISCV_IRQ_WORK_H */

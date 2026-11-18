@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * The ESP32-S31-WROOM-3-N16R16V module alone (16 MB flash, 16 MB PSRAM):
+ * UART0, Wi-Fi and Bluetooth.  The root is in the flash window of the
+ * firmware.
+ */
+/dts-v1/;
+#include "esp32s31.dtsi"
+
+/ {
+	model = "Espressif ESP32-S31-WROOM-3-N16R16V";
+	compatible = "esp,esp32s31-wroom-3", "esp,esp32s31";
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+};
+
+/* The module has no board nets: only the flash pins and UART0 have names. */
+&pinctrl {
+	gpio-line-names =
+		/*  0 */ "", "", "", "", "", "", "", "", "", "", "", "", "",
+		/* 13 */ "", "", "", "", "", "", "", "", "", "", "", "", "",
+		/* 26 */ "SPICS", "SPIQ", "SPIWP", "", "SPIHD", "SPICLK",
+		/* 32 */ "SPID", "", "", "", "", "", "", "", "", "", "", "",
+		/* 44 */ "", "", "", "", "", "", "", "", "", "", "", "", "",
+		/* 57 */ "", "U0TXD", "U0RXD", "", "";
+
+	i2c0_cfg: i2c0-cfg {
+		i2c0-pins {
+			pinmux = <ESP32S31_MATRIX_INOUT(47, ESP32S31_SIG_I2C0_SDA)>,
+				 <ESP32S31_MATRIX_INOUT(48, ESP32S31_SIG_I2C0_SCL)>;
+			bias-pull-up;
+			drive-open-drain;
+		};
+	};
+};
+
+/*
+ * An I2C bus on two free pads, GPIO47 (SDA) and GPIO48 (SCL): /dev/i2c-0
+ * when "okay", with CONFIG_I2C in linux-esp32s31.fragment.  The pull-ups of
+ * the pads are weak: add 4.7 kOhm to 3V3.
+ */
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_cfg>;
+	clock-frequency = <100000>;
+	status = "disabled";
+};
+
+/* The "rootfs" and "data" partitions of partitions-esp32s31.csv. */
+&wifi {
+	flash {
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "rootfs";
+				reg = <0x0 0x800000>;
+				read-only;
+			};
+
+			partition@800000 {
+				label = "data";
+				reg = <0x800000 0x1f0000>;
+			};
+		};
+	};
+};

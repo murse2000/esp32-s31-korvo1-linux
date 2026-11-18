@@ -21,18 +21,19 @@
 | `bsp/` | Espressif ESP32-S31 BSP 소스 스냅샷 및 원본 라이선스 |
 | `buildroot/` | Buildroot 소스 스냅샷 및 원본 라이선스 |
 | `esp-buildroot-external/` | Korvo-1 NOR defconfig, 디바이스 트리, Linux 설정 조각, rootfs overlay, ESP-Hosted 관련 Buildroot 패키지 |
+| `linux/` | S31 AHB-GDMA와 I²S/ASoC CPU-DAI를 포함한 Linux 소스 오버레이 |
 | `korvo1-nor-reference.patch` | 고정된 `annoyedmilk/esp32-s31-linux` 레퍼런스 트리에 Korvo-1 설정과 NOR 파티션 구성을 적용하는 패치 |
 | `buildroot-host-util-linux-fix.patch` | 레퍼런스 Buildroot의 host util-linux 빌드 문제를 우회하는 패치 |
 | `build-korvo-wsl.sh` | WSL Ubuntu에서 필요한 도구를 준비하고 전체 빌드 및 이미지 조립을 수행하는 스크립트 |
 | `flash-korvo1.ps1` | Windows에서 esptool로 보드에 이미지를 기록하는 PowerShell 스크립트 |
-| `build-output/` | 현재 Korvo-1 전체 이미지, Linux 커널, SquashFS rootfs, 파티션표, SHA-256 목록 및 이전 이미지 보관본 |
+| `build-output/` | 현재 Korvo-1 flash/SD 이미지, Linux 커널, 파티션표, SHA-256 목록 및 이전 이미지 보관본 |
 | `docs/bring-up.md` | 실제 보드에서 확인한 부팅 및 주변 장치 기록 |
 | `docs/environment/` | 사용한 WSL Ubuntu 24.04 배포판 파일의 검증용 SHA-256 |
 | `schematics/` | ESP32-S31 Korvo-1 회로도 PDF |
 | `uart_driver/` | Silicon Labs CP210x Windows UART 드라이버와 제조사 라이선스·안내 파일 |
 | `UPSTREAM.md` | upstream 저장소 주소, 기준 커밋 및 라이선스 안내 |
 
-중첩 `.git` 디렉터리와 upstream의 전체 Git 이력은 복사하지 않았습니다. 대신 `UPSTREAM.md`에 사용한 각 기준 커밋을 기록했습니다. 빌드 캐시와 임시 로그는 산출물에 포함하지 않습니다. 현재 빌드 스크립트는 포함된 소스 디렉터리를 직접 빌드하는 대신, 고정된 `annoyedmilk/esp32-s31-linux` 커밋과 하위 모듈을 WSL 홈 디렉터리에 받아 패치를 적용해 빌드합니다. 포함된 `bsp/`, `buildroot/`, `esp-buildroot-external/`은 수정·검토 가능한 소스 스냅샷입니다.
+중첩 `.git` 디렉터리와 upstream의 전체 Git 이력은 복사하지 않았습니다. 대신 `UPSTREAM.md`에 사용한 각 기준 커밋을 기록했습니다. 빌드 캐시와 임시 로그는 산출물에 포함하지 않습니다. 현재 빌드 스크립트는 포함된 소스 디렉터리를 직접 빌드하는 대신, 고정된 `annoyedmilk/esp32-s31-linux` 커밋과 하위 모듈을 WSL 홈 디렉터리에 받아 패치를 적용해 빌드합니다. 포함된 `bsp/`, `buildroot/`, `esp-buildroot-external/`, `linux/`은 수정·검토 가능한 소스입니다.
 
 ### 준비물
 
@@ -83,7 +84,8 @@ BR_JOBS=4 ./build-korvo-wsl.sh
 
 - `korvo1-flash.bin` — 주소 0부터 기록하는 16,777,216바이트 전체 flash 이미지
 - `korvo1-linux-Image` — ESP32-S31용 Linux 커널 이미지
-- `korvo1-rootfs.squashfs` — 읽기 전용 SquashFS root filesystem
+- `korvo1-sdcard.img.xz` — microSD에서 부팅하는 현재 Linux root filesystem 이미지
+- `korvo1-rootfs.squashfs` — 이전 NOR rootfs 배치의 참고 산출물이며 현재 SD 부팅 구성에서는 사용하지 않음
 - `korvo1-partitions.csv` — ESP32 파티션 테이블
 - `SHA256SUMS` — 게시된 모든 `build-output` 파일의 SHA-256 목록
 - `s31_full_flash-obsolete-before-korvo1.bin` — 과거 참고용 이미지. 현재 Korvo-1 빌드에 사용하면 안 됩니다.
@@ -103,11 +105,10 @@ sha256sum -c SHA256SUMS
 | `phy_init` | `0x00F000` | `0x001000` | RF PHY 초기화 데이터 |
 | `factory` | `0x020000` | `0x1A0000` | Hart 0용 factory/radio firmware 이미지 영역 |
 | `opensbi` | `0x1C0000` | `0x030000` | OpenSBI |
-| `linux` | `0x1F0000` | `0x4E0000` | Hart 1 Linux 이미지 |
-| `rootfs` | `0x6D0000` | `0x7D0000` | 읽기 전용 rootfs |
+| `linux` | `0x1F0000` | `0xCB0000` | Hart 1 kernel 영역 및 manifest. 현재 root filesystem은 microSD에서 부팅 |
 | `data` | `0xEA0000` | `0x160000` | UBI/UBIFS 쓰기 가능 데이터 영역 |
 
-rootfs 이미지는 8,163,328바이트이고 파티션은 8,192,000바이트라서 28,672바이트가 남습니다. `tmux`는 약 8.93MiB를 차지하는 것으로 측정되어 rootfs 공간을 초과하므로 최종 구성에서 제외했습니다.
+현재 Linux root filesystem은 microSD 이미지(`korvo1-sdcard.img.xz`)에서 부팅합니다. 16MiB NOR의 Linux 영역은 `0x1F0000`부터 `0xEA0000`까지이며, `flash-korvo1.ps1`은 커널과 크기 manifest만 기록하고 UBI 데이터 영역은 덮어쓰지 않습니다. `tmux`는 약 8.93MiB로 측정되어 microSD rootfs 구성에서도 제외했습니다.
 
 ### 보드 플래시
 
@@ -120,7 +121,7 @@ rootfs 이미지는 8,163,328바이트이고 파티션은 8,192,000바이트라�
 .\flash-korvo1.ps1 -Port COM3
 ```
 
-기본 포트는 `COM3`, 속도는 921600 baud이며, 전체 16MiB 이미지가 주소 `0x0`에 기록됩니다. 포트가 다르면 `COM7` 등 실제 번호로 바꿉니다. 스크립트는 Windows Python launcher를 통해 Python 3.12의 `esptool` 모듈을 실행하므로 해당 환경에 esptool이 설치되어 있어야 합니다.
+기본 포트는 `COM3`, 속도는 921600 baud입니다. 스크립트는 Linux kernel을 `0x1F0000`, kernel-size manifest를 `0x6AF000`에 기록하며 microSD나 UBI 데이터 영역은 건드리지 않습니다. 포트가 다르면 `COM7` 등 실제 번호로 바꿉니다. 스크립트는 Windows Python launcher를 통해 Python 3.12의 `esptool` 모듈을 실행하므로 해당 환경에 esptool이 설치되어 있어야 합니다. `korvo1-flash.bin`은 전체 16MiB 복구 이미지이며 NOR 데이터를 모두 덮어씁니다.
 
 Ubuntu 안에서 직접 기록하려면 빌드 스크립트가 생성한 Python 환경에서 `esptool`을 사용하고 `FLASH_PORT`를 설정할 수 있습니다.
 
@@ -159,7 +160,7 @@ iw dev wlan0 scan | grep -E '^(BSS|[[:space:]]*SSID:|[[:space:]]*signal:)'
 
 #### 3. 여러 Wi-Fi 네트워크 저장 및 자동 접속
 
-이 이미지에는 부팅 시 실행되는 `/etc/init.d/S40wifi`가 포함되어 있습니다. 이 서비스는 `/etc/wpa_supplicant.conf`를 읽어 `wpa_supplicant`를 시작하고 연결을 감시하며 DHCP 주소를 받습니다. 기본 SquashFS는 읽기 전용이지만 `/etc` 변경은 UBIFS overlay에 저장되므로 재부팅 후에도 유지됩니다. 설정을 위해 다시 빌드하거나 플래시할 필요가 없습니다.
+이 이미지에는 부팅 시 실행되는 `/etc/init.d/S40wifi`가 포함되어 있습니다. 이 서비스는 `/etc/wpa_supplicant.conf`를 읽어 `wpa_supplicant`를 시작하고 연결을 감시하며 DHCP 주소를 받습니다. 현재 root filesystem은 microSD의 ext4 파티션이고 쓰기 가능하므로 `/etc` 설정은 재부팅 후에도 유지됩니다. 설정을 위해 다시 빌드하거나 플래시할 필요가 없습니다.
 
 기본 설정의 전역 옵션은 보존하고, 아래 `network` 블록을 파일 끝에 추가하세요. 비밀번호는 보드 터미널에서 직접 입력하고 저장소나 채팅에 올리지 마세요.
 
@@ -221,7 +222,7 @@ ping -c 3 example.com
 kill "$(cat /run/wpa_supplicant.wlan0.pid)"
 ```
 
-다시 연결할 때는 `wpa_supplicant`와 `udhcpc` 명령을 다시 실행합니다. 현재 root filesystem은 읽기 전용이고 `/tmp`, `/run`은 메모리 파일시스템입니다. 따라서 위 설정은 재부팅 후 유지되지 않습니다. 자동 연결을 원하면 rootfs overlay에 적절한 시작 스크립트와 안전한 자격 증명 저장 방법을 추가한 다음 이미지를 다시 빌드해야 합니다. 암호를 공개 저장소에 커밋하지 마세요.
+다시 연결할 때는 `/etc/init.d/S40wifi restart`를 실행합니다. 현재 root filesystem은 microSD ext4로 쓰기 가능하며, `/tmp`와 `/run`은 메모리 파일시스템입니다. 설정 파일은 `/etc/wpa_supplicant.conf`에 저장되므로 재부팅 후에도 유지됩니다. 암호를 공개 저장소에 커밋하지 마세요.
 
 #### 문제 해결
 
@@ -237,12 +238,34 @@ kill "$(cat /run/wpa_supplicant.wlan0.pid)"
 
 - COM3 UART, 921600 baud로 이미지를 기록하고 부팅 확인
 - Hart 0 ESP-Hosted radio firmware NG-1.0.6.0.24, Hart 1 OpenSBI 및 Linux 7.3.4 부팅
-- SquashFS rootfs 마운트 및 UBI/UBIFS 데이터 overlay 초기화
+- microSD의 ext4 root filesystem 부팅 및 FAT boot partition을 `/mnt/sd`에 마운트
 - Linux에서 `wlan0` 및 Bluetooth `hci0` 등록. Wi-Fi AP 연결과 성능은 이 기록에서 검증하지 않았으며, 사용자가 SSID와 암호를 제공해 직접 연결해야 합니다.
 - 800×480 framebuffer, Goodix GT1151 터치, USB HID 키보드 감지
-- ES8389 코덱 드라이버를 커널에 빌드했습니다. 현재 BSP 커널에는 ESP32-S31 I²S CPU-DAI/사운드 카드 드라이버가 없어 부팅 로그에 `No soundcards found`가 나오며, 재생·녹음은 아직 사용할 수 없습니다. 코덱의 I²C probe도 별도로 확인해야 합니다.
+- 인터넷에서 확인한 Espressif Korvo-1 보드 핀맵과 ESP-IDF S31 AHB-PDMA IRQ 표를 기준으로 AHB-GDMA, ESP32-S31 I²S CPU-DAI, ES8389 코덱 및 simple-audio-card 연결을 구현했습니다. 커널 로그에서 ES8389 probe와 `Korvo-1 ES8389` 카드 등록을 확인했고, ALSA가 playback/capture PCM 장치를 만들었습니다.
+- `aplay -l`에서 카드 0 `Korvo-1 ES8389`를 확인했습니다. 44.1 kHz WAV를 `aplay -D hw:0,0 ...`로 재생할 때 I²S playback 시작/종료 및 AHB-GDMA cyclic TX 전송 로그가 확인됐고, codec clock coefficient 오류는 수정했습니다. 이는 Linux→DMA→I²S PCM 경로의 검증입니다. 실제 스피커에서 들리는 음량·음질은 귀로 확인하지 않았으므로 아날로그 출력까지 검증 완료라고 단정하지 않습니다.
+- 현재 Buildroot microSD rootfs에는 `aplay`와 `mpg123`이 포함됩니다. MP3 디코더 버전은 확인했지만 보드에서 MP3 파일 재생 자체는 아직 시험하지 않았습니다.
 
 이 목록은 모든 주변 장치가 완전히 동작한다는 보증이 아닙니다. 검증한 구성요소와 아직 확인하지 않은 기능을 구분해 기록합니다.
+
+#### ES8389 사운드 재생과 녹음
+
+이 드라이버는 공식 [Korvo-1 BSP 핀맵](https://github.com/espressif/esp-bsp/blob/master/bsp/esp32_s31_korvo_1/API.md) 및 [ESP-IDF S31 GDMA 연결표](https://github.com/espressif/esp-idf/blob/master/components/esp_hal_dma/esp32s31/gdma_periph.c)를 참고해 Linux 7.3.4용으로 추가했습니다. I²S는 GPIO3(BCLK), GPIO4(WS), GPIO5(DOUT), GPIO6(DIN)를 사용하며 보드에서 ES8389로 가는 별도 MCLK 연결은 없습니다. ES8389는 I²C 7-bit 주소 `0x10`이고, 스피커 출력은 코덱 뒤 NS4150B 앰프와 연결됩니다. [보드 사용자 안내서](https://documentation.espressif.com/esp-dev-kits/en/latest/esp32s31/esp32-s31-korvo-1/index.html)는 ES8389와 NS4150B를 이 보드의 오디오 부품으로 명시합니다.
+
+커널 설정에는 S31 AHB-GDMA, I²S ASoC CPU-DAI, ES8389 codec와 simple-audio-card가 포함됩니다. 현재 보드에서 ALSA 카드 0과 playback/capture PCM 장치, GDMA playback 전송을 확인했습니다. WAV 재생은 다음처럼 실행합니다.
+
+```sh
+cat /proc/asound/cards
+aplay -l
+aplay -D hw:0,0 /mnt/sd/your-audio.wav
+```
+
+microSD rootfs에는 ALSA `aplay`와 MP3 디코더 `mpg123`을 포함합니다. MP3 파일은 다음처럼 재생할 수 있습니다.
+
+```sh
+mpg123 -a hw:0,0 /mnt/sd/your-audio.mp3
+```
+
+파일 경로는 실제 microSD 마운트 경로로 바꾸세요. 확인한 것은 ALSA 장치 등록과 Linux PCM 버퍼가 GDMA/I²S로 전달되는 경로입니다. 현재 기록에서는 스피커에서 들리는 실제 음량/음질과 마이크 녹음 결과를 청취·측정하지 않았으므로, 이를 아날로그 입출력까지 완전히 검증한 것으로 해석하면 안 됩니다.
 
 ### 재현 기준과 라이선스
 
@@ -271,7 +294,7 @@ On the tested board, the ESP-Hosted radio firmware starts on Hart 0 while OpenSB
 | `buildroot-host-util-linux-fix.patch` | Host util-linux build workaround for that reference build |
 | `build-korvo-wsl.sh` | WSL build, dependency setup, and image assembly script |
 | `flash-korvo1.ps1` | Windows PowerShell flashing script |
-| `build-output/` | Current flash image, kernel, SquashFS rootfs, partition table, checksums, and a clearly marked historical image |
+| `build-output/` | Current flash and microSD images, kernel, partition table, checksums, and a clearly marked historical image |
 | `docs/bring-up.md` | Hardware boot and peripheral bring-up record |
 | `docs/environment/` | SHA-256 reference for the WSL Ubuntu 24.04 distribution archive used during setup |
 | `schematics/` | ESP32-S31 Korvo-1 schematic PDF |
@@ -320,7 +343,8 @@ The script keeps its working reference checkout under `${HOME}/esp32-s31-linux-r
 
 - `korvo1-flash.bin` — complete 16,777,216-byte image, padded for writing at flash offset `0x0`
 - `korvo1-linux-Image` — Linux kernel image
-- `korvo1-rootfs.squashfs` — read-only root filesystem
+- `korvo1-sdcard.img.xz` — current Linux root filesystem image for the microSD card
+- `korvo1-rootfs.squashfs` — retained artifact from the prior NOR-rootfs layout; unused by the current SD-root setup
 - `korvo1-partitions.csv` — ESP partition table
 - `SHA256SUMS` — checksums for every file in `build-output/`
 - `s31_full_flash-obsolete-before-korvo1.bin` — historical reference only; **do not flash it for the current Korvo-1 setup**
@@ -340,11 +364,10 @@ sha256sum -c SHA256SUMS
 | `phy_init` | `0x00F000` | `0x001000` | RF PHY initialization data |
 | `factory` | `0x020000` | `0x1A0000` | Hart-0 factory/radio firmware image region |
 | `opensbi` | `0x1C0000` | `0x030000` | OpenSBI |
-| `linux` | `0x1F0000` | `0x4E0000` | Hart-1 Linux image |
-| `rootfs` | `0x6D0000` | `0x7D0000` | Read-only root filesystem |
+| `linux` | `0x1F0000` | `0xCB0000` | Hart-1 kernel region and size manifest; root filesystem boots from microSD |
 | `data` | `0xEA0000` | `0x160000` | Writable UBI/UBIFS data area |
 
-The SquashFS image is 8,163,328 bytes in an 8,192,000-byte rootfs partition, leaving 28,672 bytes free. `tmux` was measured at about 8.93 MiB and omitted because it would exceed the remaining rootfs space.
+The Linux root filesystem boots from `korvo1-sdcard.img.xz`. The NOR Linux partition spans `0x1F0000` through `0xEA0000`; `flash-korvo1.ps1` writes only the kernel at `0x1F0000` and its size manifest at `0x6AF000`, leaving the UBI data region untouched. `korvo1-flash.bin` is a full 16 MiB recovery image and overwrites all NOR contents. `tmux` was measured at about 8.93 MiB and omitted from the root filesystem.
 
 ### Flash the board
 
@@ -357,13 +380,13 @@ The SquashFS image is 8,163,328 bytes in an 8,192,000-byte rootfs partition, lea
 .\flash-korvo1.ps1 -Port COM3
 ```
 
-The script defaults to `COM3` and uses 921600 baud. It updates the partition table, Linux image, and SquashFS rootfs only; it leaves the writable data partition untouched, so Wi-Fi profiles in UBIFS persist. Substitute the actual port if it differs. The Windows Python launcher must provide Python 3.12 with `esptool` installed. `korvo1-flash.bin` remains available for a full-image recovery, which overwrites all 16 MiB including writable data.
+The script defaults to `COM3` and uses 921600 baud. It writes the kernel and its manifest only, leaving the microSD card and writable NOR data partition untouched. Substitute the actual port if it differs. The Windows Python launcher must provide Python 3.12 with `esptool` installed. `korvo1-flash.bin` remains available for a full-image recovery, which overwrites all 16 MiB including writable data.
 
 The build script can also invoke esptool in its ESP-IDF Python environment when `FLASH_PORT` is set, for example `FLASH_PORT=/dev/ttyUSB0 ./build-korvo-wsl.sh`. USB device forwarding into WSL is environment-dependent; using the Windows PowerShell script is often simpler.
 
 ### Search for Wi-Fi networks and connect from `wlan0`
 
-The image includes `iw`, `wpa_supplicant`, and a boot service at `/etc/init.d/S40wifi`. It reads `/etc/wpa_supplicant.conf`, starts the supplicant, monitors the link, and obtains a DHCP lease. The base SquashFS is read-only, but changes under `/etc` persist in the UBIFS overlay. No rebuild or reflash is needed. Run these commands **on the board's Linux console**, which opens a root shell.
+The image includes `iw`, `wpa_supplicant`, and a boot service at `/etc/init.d/S40wifi`. It reads `/etc/wpa_supplicant.conf`, starts the supplicant, monitors the link, and obtains a DHCP lease. The root filesystem is writable ext4 on microSD, so `/etc` changes persist across reboots. No rebuild or reflash is needed. Run these commands **on the board's Linux console**, which opens a root shell.
 
 Check the interface and tools:
 
@@ -431,9 +454,24 @@ Troubleshooting:
 
 ### Hardware validation and limitations
 
-See [docs/bring-up.md](docs/bring-up.md) for the detailed record. The tested board booted the Hart-0 ESP-Hosted radio firmware NG-1.0.6.0.24 and Hart-1 OpenSBI/Linux 7.3.4, mounted SquashFS, initialized the UBI/UBIFS overlay, and detected the 800×480 framebuffer, Goodix GT1151 touch, USB HID keyboard and `wlan0`. The `data` MTD partition now reports the intended 0x160000 size, and the shell starts on the overlay root. Bluetooth `hci0` was registered in the earlier bring-up; Wi-Fi AP association was not tested during this update. The ES8389 codec driver is built in, but this image reports `No soundcards found`; the BSP still needs an ESP32-S31 I²S CPU-DAI and ASoC card link for playback/capture. Camera support has not been brought up.
+See [docs/bring-up.md](docs/bring-up.md) for the detailed record. The tested board booted the Hart-0 ESP-Hosted radio firmware NG-1.0.6.0.24 and Hart-1 OpenSBI/Linux 7.3.4, and detected the 800×480 framebuffer, Goodix GT1151 touch, USB HID keyboard, `wlan0`, and the `Korvo-1 ES8389` ALSA card. A WAV PCM playback run reached I²S/AHB-GDMA TX. Audible speaker output and microphone capture still need physical confirmation. Camera support has not been brought up.
 
 These are observations from the tested configuration, not a guarantee that every peripheral or feature is fully supported.
+
+#### ES8389 audio
+
+The Linux 7.3.4 overlay adds the ESP32-S31 AHB-GDMA provider and I²S ASoC CPU-DAI, then links them to the in-tree ES8389 codec driver with `simple-audio-card`. The implementation used the [official Korvo-1 BSP pin map](https://github.com/espressif/esp-bsp/blob/master/bsp/esp32_s31_korvo_1/API.md), [official S31 GDMA signal table](https://github.com/espressif/esp-idf/blob/master/components/esp_hal_dma/esp32s31/gdma_periph.c), and [Korvo-1 hardware guide](https://documentation.espressif.com/esp-dev-kits/en/latest/esp32s31/esp32-s31-korvo-1/index.html). I²S uses GPIO3 BCLK, GPIO4 WS, GPIO5 DOUT, and GPIO6 DIN; the codec MCLK pin is not wired on this board. The ES8389 is at Linux I²C address `0x10` and the speaker path goes through an NS4150B amplifier.
+
+On the tested board, `/proc/asound/cards` and `aplay -l` showed `Korvo-1 ES8389`; playback and capture PCM nodes were created. A WAV played with `aplay -D hw:0,0` completed and kernel logs showed cyclic AHB-GDMA TX and I²S playback start/stop. This confirms the Linux PCM-to-DMA/I²S path, but physical speaker audibility and microphone capture have not been confirmed. The microSD Buildroot image includes `aplay` and `mpg123`; an MP3 decode/play test remains to be performed.
+
+```sh
+cat /proc/asound/cards
+aplay -l
+aplay -D hw:0,0 /mnt/sd/test.wav
+mpg123 -a hw:0,0 /mnt/sd/test.mp3
+```
+
+Replace `/mnt/sd` with the card's actual mount path. See [docs/bring-up.md](docs/bring-up.md) for board test details.
 
 ### Revisions and licenses
 

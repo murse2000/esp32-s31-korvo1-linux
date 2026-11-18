@@ -1,0 +1,13 @@
+diff --git a/package/alsa-utils/alsa-utils.mk b/package/alsa-utils/alsa-utils.mk
+--- a/package/alsa-utils/alsa-utils.mk
++++ b/package/alsa-utils/alsa-utils.mk
+@@ -27,7 +27,7 @@ ALSA_UTILS_CONF_ENV = \
+ 	LIBS=$(TARGET_NLS_LIBS)
+ 
+ ALSA_UTILS_CONF_OPTS = \
+ 	--disable-xmlto \
+ 	--disable-rst2man \
+-	--with-curses=$(if $(BR2_PACKAGE_NCURSES_WCHAR),ncursesw,ncurses)
++	--with-curses=ncurses
+ 
+ ifeq ($(BR2_PACKAGE_ALSA_UTILS_ALSALOOP),y)

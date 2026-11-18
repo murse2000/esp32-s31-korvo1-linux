@@ -1,0 +1,20 @@
+diff --git a/linux/linux.mk b/linux/linux.mk
+--- a/linux/linux.mk
++++ b/linux/linux.mk
+@@ -315,6 +315,16 @@ define LINUX_APPLY_LOCAL_PATCHES
+ endef
+ 
+ LINUX_POST_PATCH_HOOKS += LINUX_APPLY_LOCAL_PATCHES
++
++# The ESP32-S31 SoC drivers and DTS live in the external project's linux/
++# overlay.  Install them after the kernel patch series, before configuration.
++define LINUX_APPLY_ESP32S31_OVERLAY
++	for d in Documentation arch drivers include; do \
++		mkdir -p $(LINUX_DIR)/$$d; \
++		cp -a $(BR2_EXTERNAL_ESP32S31_PATH)/../linux/$$d/. $(LINUX_DIR)/$$d/; \
++	done
++endef
++LINUX_POST_PATCH_HOOKS += LINUX_APPLY_ESP32S31_OVERLAY
+ 
+ # Older versions break on gcc 10+ because of redefined symbols
+ define LINUX_DROP_YYLLOC

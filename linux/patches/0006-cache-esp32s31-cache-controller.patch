@@ -1,0 +1,73 @@
+From: Marco Müller <hello@annoyedmilk.ch>
+Subject: [PATCH] cache: add the ESP32-S31 cache controller
+
+No Zicbom: the sync engine keeps DMA coherent.  Enable non-coherent DMA in
+setup_arch(), so that slab gets the alignment before the initcalls.
+
+Upstream: not sent
+---
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -29,6 +29,7 @@
+ #include <asm/cacheflush.h>
+ #include <asm/cpufeature.h>
+ #include <asm/early_ioremap.h>
++#include <asm/esp32s31-cache.h>
+ #include <asm/pgtable.h>
+ #include <asm/setup.h>
+ #include <asm/set_memory.h>
+@@ -357,6 +358,18 @@
+ 	if (IS_ENABLED(CONFIG_RISCV_ISA_ZICBOM) &&
+ 	    riscv_isa_extension_available(NULL, ZICBOM))
+ 		riscv_noncoherent_supported();
++	/*
++	 * The ESP32-S31 has no Zicbom.  Its cache controller driver gives the
++	 * maintenance operations through SBI calls from an early_initcall.
++	 * Enable the support here anyway: the slab allocator gets the
++	 * kmalloc alignment from dma_get_cache_alignment() before the
++	 * initcalls.  Without SWIOTLB, nothing can bounce a DMA buffer that
++	 * shares a cache line with a different allocation.
++	 */
++	if (IS_ENABLED(CONFIG_ESP32S31_CACHE)) {
++		riscv_cbom_block_size = ESP32S31_CACHE_LINE_SIZE;
++		riscv_noncoherent_supported();
++	}
+ 	riscv_set_dma_cache_alignment();
+ 
+ 	riscv_user_isa_enable();
+diff --git a/drivers/cache/Kconfig b/drivers/cache/Kconfig
+--- a/drivers/cache/Kconfig
++++ b/drivers/cache/Kconfig
+@@ -16,6 +16,20 @@
+ 	help
+ 	  Support for the L2 cache controller on Andes Technology AX45MP platforms.
+ 
++config ESP32S31_CACHE
++	bool "Espressif ESP32-S31 cache controller"
++	depends on RISCV && 32BIT
++	select RISCV_DMA_NONCOHERENT
++	select RISCV_NONSTANDARD_CACHE_OPS
++	select DMA_GLOBAL_POOL if !DMA_DIRECT_REMAP
++	help
++	  Cache maintenance for DMA on the Espressif ESP32-S31.  The hart has
++	  no Zicbom, and the port does not map PSRAM as uncached.  Thus the
++	  sync engine of the cache controller keeps DMA buffers coherent.
++	  OpenSBI operates it for Linux through a vendor SBI extension.
++	  Coherent allocations come from a shared-dma-pool in internal SRAM,
++	  which the CPU accesses without the data cache.
++
+ config SIFIVE_CCACHE
+ 	bool "Sifive Composable Cache controller"
+ 	depends on ARCH_SIFIVE || ARCH_STARFIVE
+diff --git a/drivers/cache/Makefile b/drivers/cache/Makefile
+--- a/drivers/cache/Makefile
++++ b/drivers/cache/Makefile
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ 
+ obj-$(CONFIG_AX45MP_L2_CACHE)		+= ax45mp_cache.o
++obj-$(CONFIG_ESP32S31_CACHE)		+= esp32s31-cache.o
+ obj-$(CONFIG_SIFIVE_CCACHE)		+= sifive_ccache.o
+ obj-$(CONFIG_STARFIVE_STARLINK_CACHE)	+= starfive_starlink_cache.o
+ 

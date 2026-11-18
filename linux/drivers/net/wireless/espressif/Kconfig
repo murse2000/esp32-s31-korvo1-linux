@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config ESP32S31_HOSTED
+	bool "ESP-Hosted for the ESP32-S31 (shared memory)"
+	depends on SOC_ESP32S31 && CFG80211=y && BT=y
+	# Built in: the flash part cannot call a modular MTD.
+	depends on MTD=y || MTD=n
+	help
+	  The ESP-Hosted host driver for the ESP-Hosted firmware on hart 0:
+	  Wi-Fi (cfg80211 full-MAC), Bluetooth HCI and the Spinel stream of
+	  the IEEE 802.15.4 RCP (/dev/esp_rcp0).  The frames go through
+	  rings in internal SRAM.  Buildroot copies the upstream
+	  driver into esp_hosted/ (br2-external/linux).  With MTD, the
+	  flash window of the firmware is the MTD device esp32s31-flash,
+	  with the partitions of the "flash" child node.
