@@ -71,6 +71,16 @@ All ten framebuffer comparisons passed with zero pixel differences: vertical/hor
 
 The final published image was flashed at 921600 baud and booted as kernel `#11` (2026-11-19 12:45 KST). Wi-Fi automatically reconnected to 192.168.1.37, the menu started with the normal CPU monitor and no extra task profiler, and native framebuffer scanout remained active. Installed PPA module, GUI, music player and diagnostic-tool SHA-256 hashes match the Buildroot target. DMA2D completion interrupts incremented with capabilities `0x33e` and zero hardware errors; ES8389 remained registered.
 
+### CPU follow-up and offscreen canvas correction (2026-11-19)
+
+The PPA unit incorrectly returned 0 (busy) when it had no eligible task. This prevented the dispatch request loop in buffered vector/canvas initialization from completing and consumed CPU continuously. Both renderer builds now return `LV_DRAW_UNIT_IDLE`. The regression fixture creates an offscreen ARGB canvas, waits for completion and checks its pixels; all twelve official variants passed bounded execution and exit after the correction.
+
+Small dirty regions and their shifted ghosts can now be redrawn while retaining scroll pixel reuse. Eleven full-frame comparisons passed exactly, including this new path. Default and extra renderers, plus cache/batch-disabled variants, also matched exactly. The pure-SW/PPA comparison retained only the existing one-step alpha quantization differences.
+
+Additional mask/text/shadow caches and batched ioctls were implemented, but repeated CPU measurements did not show a uniform benefit. The default executables link the established drawing path with the IDLE/scroll fixes; separate `korvo-ui-extra` and `lvgl-music-demo-extra` executables provide the additional renderer without adding its drawing code to the default process. The [full measurement report](../tests/results/cpu-2026-11-19.md) includes unsuccessful settings and the final selection.
+
+Unused code is removed at link time. The camera buffer is allocated only in camera mode, and the original 14-second melody is generated on the build host and installed on the microSD root filesystem. This removes on-board synthesis at first PLAY and a 1.18MiB tmpfs file. Wi-Fi credentials, SSH access, native display timing and the underlying radio firmware are preserved during in-place deployment.
+
 ### Audio verification commands
 
 Run on the board's Linux shell:

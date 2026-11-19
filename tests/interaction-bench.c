@@ -114,10 +114,10 @@ int main(int argc, char **argv)
             }
         }
         else lv_slider_set_value(control, position * 16, LV_ANIM_OFF);
-        if(scroll && getenv("KORVO_INTERACTION_CONTENT_CHANGE") && i == 30) {
+        if(scroll && (getenv("KORVO_INTERACTION_CONTENT_CHANGE") || getenv("KORVO_INTERACTION_SMALL_CHANGE")) && i == 30) {
             lv_obj_t *row = lv_obj_get_child(control, horizontal ? 0 : 5);
             lv_label_set_text(lv_obj_get_child(row, 0), "Changed while scrolling");
-            lv_obj_set_style_bg_color(control, lv_color_hex(0xc0d0e0), 0);
+            if(!getenv("KORVO_INTERACTION_SMALL_CHANGE")) lv_obj_set_style_bg_color(control, lv_color_hex(0xc0d0e0), 0);
         }
         lv_refr_now(d);
         capture(getenv("KORVO_INTERACTION_CAPTURE"), i);

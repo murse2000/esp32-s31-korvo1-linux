@@ -9,7 +9,7 @@ if [ -e "$output" ]; then echo 'Use a new output directory.' >&2; exit 2; fi
 mkdir -p "$output"
 /etc/init.d/S97lvgl-music-demo stop
 trap '/etc/init.d/S97lvgl-music-demo start' EXIT HUP INT TERM
-for scene in vertical horizontal changed coalesced transparent tabview custom floating overlay gradient; do
+for scene in vertical horizontal changed small-change coalesced transparent tabview custom floating overlay gradient; do
   mode=scroll
   frames=90
   [ "$scene" != horizontal ] || mode=scroll-x
@@ -22,9 +22,11 @@ for scene in vertical horizontal changed coalesced transparent tabview custom fl
     unset KORVO_INTERACTION_FLOATING KORVO_INTERACTION_OVERLAY KORVO_INTERACTION_GRADIENT
     unset KORVO_INTERACTION_TRANSPARENT KORVO_INTERACTION_CUSTOM
     unset KORVO_INTERACTION_TABVIEW
+    unset KORVO_INTERACTION_SMALL_CHANGE
     [ -z "$disable" ] || export KORVO_SCROLL_DISABLE=1
     case $scene in
       changed) export KORVO_INTERACTION_CONTENT_CHANGE=1;;
+      small-change) export KORVO_INTERACTION_SMALL_CHANGE=1;;
       coalesced) export KORVO_INTERACTION_COALESCE=1;;
       floating) export KORVO_INTERACTION_FLOATING=1;;
       overlay) export KORVO_INTERACTION_OVERLAY=1;;
@@ -37,6 +39,11 @@ for scene in vertical horizontal changed coalesced transparent tabview custom fl
       "$bench" "$mode" "$frames" > "$output/$scene-$renderer.log" 2>&1
     cat "$output/$scene-$renderer.log"
     if [ "$renderer" = reused ]; then
+      if [ "$scene" = small-change ]; then
+        grep -Eq 'korvo-cache: .*dirty_reused=[1-9][0-9]*' "$output/$scene-$renderer.log" || {
+          echo 'FAIL small-change: bounded dirty redraw was not exercised' >&2; exit 1;
+        }
+      fi
       case $scene in
         overlay|gradient) :;;
         *) grep -Eq 'korvo-scroll: .*moves=[1-9][0-9]*' "$output/$scene-$renderer.log" || {

@@ -1,0 +1,67 @@
+cpu-base slider run=1
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction slider frames=90 wall_us=3009033 render_us=893358 cpu_us=362718 cpu_pct=12 minflt=846 majflt=1
+korvo-scroll: calls=0 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=90 flush=90 blend=192 errors=0
+cpu-new slider run=1
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction slider frames=90 wall_us=3009186 render_us=553364 cpu_us=325444 cpu_pct=10 minflt=62 majflt=0
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=0 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=90 flush=90 blend=192 errors=0
+cpu-base scroll run=1
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=3000700 render_us=2139439 cpu_us=1372711 cpu_pct=45 minflt=118 majflt=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+cpu-new scroll run=1
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=3778624 render_us=3615170 cpu_us=1533676 cpu_pct=40 minflt=958 majflt=1
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+cpu-base slider run=2
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction slider frames=90 wall_us=3006269 render_us=474401 cpu_us=301302 cpu_pct=10 minflt=7 majflt=0
+korvo-scroll: calls=0 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=90 flush=90 blend=192 errors=0
+cpu-new slider run=2
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction slider frames=90 wall_us=3008214 render_us=553338 cpu_us=326730 cpu_pct=10 minflt=64 majflt=0
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=0 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=90 flush=90 blend=192 errors=0
+cpu-base scroll run=2
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=3264925 render_us=2647866 cpu_us=1398360 cpu_pct=42 minflt=414 majflt=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+cpu-new scroll run=2
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=3007940 render_us=2680970 cpu_us=1436168 cpu_pct=47 minflt=458 majflt=0
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+cpu-base slider run=3
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction slider frames=90 wall_us=3004331 render_us=488666 cpu_us=306666 cpu_pct=10 minflt=27 majflt=0
+korvo-scroll: calls=0 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=90 flush=90 blend=192 errors=0
+cpu-new slider run=3
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction slider frames=90 wall_us=3009431 render_us=524241 cpu_us=333888 cpu_pct=11 minflt=65 majflt=0
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=0 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=90 flush=90 blend=192 errors=0
+cpu-base scroll run=3
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=3115769 render_us=3079581 cpu_us=1461686 cpu_pct=46 minflt=826 majflt=2
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+cpu-new scroll run=3
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=3008815 render_us=2400748 cpu_us=1423662 cpu_pct=47 minflt=185 majflt=0
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+CPU_V2_COMPARISON_DONE

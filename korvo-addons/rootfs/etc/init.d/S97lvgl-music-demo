@@ -3,13 +3,13 @@
 case ${1:-start} in
   start)
     [ -e /dev/fb0 ] || exit 0
-    pidof korvo-ui lvgl-music-demo >/dev/null && exit 0
+    pidof korvo-ui korvo-ui-extra lvgl-music-demo lvgl-music-demo-extra >/dev/null && exit 0
     /usr/bin/korvo-ui menu >/var/log/korvo-ui.log 2>&1 &
     ;;
   stop)
-    killall korvo-ui lvgl-music-demo 2>/dev/null || true
+    killall korvo-ui korvo-ui-extra lvgl-music-demo lvgl-music-demo-extra 2>/dev/null || true
     for attempt in 1 2 3 4 5; do
-      pidof korvo-ui lvgl-music-demo >/dev/null || break
+      pidof korvo-ui korvo-ui-extra lvgl-music-demo lvgl-music-demo-extra >/dev/null || break
       sleep 1
     done
     ;;

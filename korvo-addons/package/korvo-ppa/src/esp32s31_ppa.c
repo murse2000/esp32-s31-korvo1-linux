@@ -18,6 +18,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <linux/uaccess.h>
 #include "korvo_ppa.h"
 
@@ -125,10 +126,7 @@ static void descriptor(struct s31ppa *p, unsigned int offset, u32 address,
 static int finish(struct s31ppa *p)
 {
     u32 status;
-    /* A tile completes in microseconds. Sleeping for 1us here can become
-     * a full 10ms scheduler tick on this kernel, once per draw operation.
-     * Poll briefly, then yield only for an unusually long transfer.
-     */
+    /* IRQ completions release the CPU. Older DTs retain bounded polling. */
     int ret;
     if (p->irq > 0) {
         ret = wait_for_completion_timeout(&p->done, msecs_to_jiffies(100)) ? 0 : -ETIMEDOUT;
@@ -193,6 +191,10 @@ static void sync_surface(struct s31ppa *p, const struct korvo_ppa_surface *s,
 }
 static int run(struct s31ppa *p, const struct korvo_ppa_request *q)
 {
+    struct korvo_ppa_request normalized = *q;
+    bool source_clean = q->format & KORVO_PPA_SOURCE_CLEAN;
+    normalized.format &= ~KORVO_PPA_SOURCE_CLEAN;
+    q = &normalized;
     u32 src = 0, dst, src_bytes = q->format == KORVO_PPA_ARGB8888 ? 4 :
                                 q->format == KORVO_PPA_A8 ? 1 : 2;
     dma_addr_t src_dma = 0, dst_dma = 0;
@@ -205,6 +207,7 @@ static int run(struct s31ppa *p, const struct korvo_ppa_request *q)
     if (q->operation != KORVO_PPA_COPY && !fill && !flush && !blend && !reuse) return -EOPNOTSUPP;
     if (q->format > KORVO_PPA_A8 || (q->format && !blend) || q->alpha > 255)
         return -EOPNOTSUPP;
+    if (source_clean && (!blend || q->format != KORVO_PPA_A8 || q->source.buffer != 1)) return -EINVAL;
     /* DMA2D RX needs complete 32-bit writes. Clients fall back for odd edges. */
     if ((q->destination.width | q->destination_x | q->width) & 1) return -EINVAL;
     if ((ret = surface(p, &q->destination, q->destination_x, q->destination_y,
@@ -224,8 +227,15 @@ static int run(struct s31ppa *p, const struct korvo_ppa_request *q)
             p->buffer_size[q->source.buffer], DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
         if (dma_mapping_error(p->dev, src_dma)) return -EIO;
         src = src_dma + q->source.offset;
-        sync_surface(p, &q->source, src_dma, DMA_TO_DEVICE, q->source_x, q->source_y,
-                     q->width, q->height, src_bytes, true);
+        if (!source_clean) {
+            /* Immutable A8 masks are synchronized in full on first use, so
+             * later cropped reads can retain device ownership safely. */
+            if (q->format == KORVO_PPA_A8 && q->source.buffer == 1)
+                sync_surface(p, &q->source, src_dma, DMA_TO_DEVICE, 0, 0,
+                             q->source.width, q->source.height, 1, true);
+            else sync_surface(p, &q->source, src_dma, DMA_TO_DEVICE, q->source_x, q->source_y,
+                              q->width, q->height, src_bytes, true);
+        }
     }
     if (q->destination.buffer < 2) {
         dst_dma = dma_map_single_attrs(p->dev, p->buffer[q->destination.buffer],
@@ -320,7 +330,8 @@ static long ppa_ioctl(struct file *file, unsigned int command, unsigned long arg
     if (command == KORVO_PPA_IOC_INFO) {
         struct korvo_ppa_info info = {KORVO_PPA_ABI, KORVO_PPA_BUFFER_SIZE, 2,
             BIT(KORVO_PPA_COPY) | BIT(KORVO_PPA_FILL) | BIT(KORVO_PPA_FLUSH) |
-            BIT(KORVO_PPA_BLEND) | BIT(KORVO_PPA_REUSE) | KORVO_PPA_CAP_A8 | (p->irq > 0 ? KORVO_PPA_CAP_IRQ : 0),
+            BIT(KORVO_PPA_BLEND) | BIT(KORVO_PPA_REUSE) | KORVO_PPA_CAP_A8 | KORVO_PPA_CAP_BATCH |
+            KORVO_PPA_CAP_IMMUTABLE_A8 | (p->irq > 0 ? KORVO_PPA_CAP_IRQ : 0),
             800, 480, p->buffer_size[0], 0};
         return copy_to_user(user, &info, sizeof(info)) ? -EFAULT : 0;
     }
@@ -328,6 +339,27 @@ static long ppa_ioctl(struct file *file, unsigned int command, unsigned long arg
         struct korvo_ppa_stats stats;
         mutex_lock(&p->lock); stats = p->stats; mutex_unlock(&p->lock);
         return copy_to_user(user, &stats, sizeof(stats)) ? -EFAULT : 0;
+    }
+    if (command == KORVO_PPA_IOC_BATCH) {
+        u32 count;
+        struct korvo_ppa_batch *batch;
+        if (get_user(count, (u32 __user *)user)) return -EFAULT;
+        if (!count || count > KORVO_PPA_BATCH_MAX) return -EINVAL;
+        batch = memdup_user(user, offsetof(struct korvo_ppa_batch, requests) + count * sizeof(q));
+        if (IS_ERR(batch)) return PTR_ERR(batch);
+        /* Do not trust the count read a second time from mutable user memory. */
+        batch->count = count;
+        batch->completed = 0;
+        if (mutex_lock_interruptible(&p->lock)) { kfree(batch); return -ERESTARTSYS; }
+        ret = claim(p, file);
+        while (!ret && batch->completed < batch->count) {
+            ret = run(p, &batch->requests[batch->completed]);
+            if (!ret) batch->completed++;
+        }
+        mutex_unlock(&p->lock);
+        if (copy_to_user(user, batch, offsetof(struct korvo_ppa_batch, requests))) ret = -EFAULT;
+        kfree(batch);
+        return ret;
     }
     if (command != KORVO_PPA_IOC_RUN) return -ENOTTY;
     if (copy_from_user(&q, user, sizeof(q))) return -EFAULT;

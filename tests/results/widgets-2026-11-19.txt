@@ -1,0 +1,49 @@
+widgets before run=1 cpu_ticks=151 start=1703.92 end=1709.87
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+korvo-ui: running widgets on /dev/fb0
+korvo-ui: 20 frames wall=5633 work=973 render=881 flush=47 ms
+korvo-ui: 20 frames wall=2862 work=1358 render=1314 flush=93 ms
+korvo-scroll: calls=63 queued=63 dirty=6 moves=20 reused_pixels=4929360
+korvo-ppa: copy=20 fill=155 flush=56 blend=311 errors=0
+widgets after run=1 cpu_ticks=102 start=1716.40 end=1722.32
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+korvo-ui: running widgets on /dev/fb0
+korvo-ui: 20 frames wall=5682 work=684 render=642 flush=21 ms
+korvo-ui: 20 frames wall=3715 work=1678 render=1549 flush=105 ms
+korvo-cache: hits=131 misses=226 batch_calls=248 batch_commands=248 dirty_reused=0
+korvo-shadow: hits=11 misses=1
+korvo-scroll: calls=31 queued=31 dirty=3 moves=8 reused_pixels=1988160
+korvo-ppa: copy=8 fill=80 flush=45 blend=189 errors=0
+widgets before run=2 cpu_ticks=109 start=1728.89 end=1735.75
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+korvo-ui: running widgets on /dev/fb0
+korvo-ui: 20 frames wall=5707 work=452 render=308 flush=16 ms
+korvo-ui: 20 frames wall=4836 work=2220 render=2011 flush=145 ms
+korvo-scroll: calls=31 queued=31 dirty=3 moves=8 reused_pixels=1988160
+korvo-ppa: copy=8 fill=79 flush=44 blend=186 errors=0
+widgets after run=2 cpu_ticks=113 start=1742.40 end=1748.77
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+korvo-ui: running widgets on /dev/fb0
+korvo-ui: 20 frames wall=5666 work=498 render=451 flush=19 ms
+korvo-ui: 20 frames wall=3323 work=1319 render=1284 flush=95 ms
+korvo-cache: hits=135 misses=256 batch_calls=271 batch_commands=271 dirty_reused=0
+korvo-shadow: hits=13 misses=1
+korvo-scroll: calls=31 queued=31 dirty=4 moves=9 reused_pixels=2241240
+korvo-ppa: copy=9 fill=88 flush=48 blend=208 errors=0
+widgets before run=3 cpu_ticks=121 start=1755.79 end=1761.46
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+korvo-ui: running widgets on /dev/fb0
+korvo-ui: 20 frames wall=5601 work=470 render=426 flush=21 ms
+korvo-ui: 20 frames wall=2375 work=650 render=631 flush=76 ms
+korvo-scroll: calls=33 queued=33 dirty=3 moves=18 reused_pixels=4496920
+korvo-ppa: copy=18 fill=129 flush=55 blend=238 errors=0
+widgets after run=3 cpu_ticks=113 start=1768.78 end=1774.43
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+korvo-ui: running widgets on /dev/fb0
+korvo-ui: 20 frames wall=5506 work=607 render=559 flush=37 ms
+korvo-ui: 20 frames wall=2031 work=621 render=599 flush=81 ms
+korvo-cache: hits=180 misses=257 batch_calls=323 batch_commands=323 dirty_reused=0
+korvo-shadow: hits=11 misses=1
+korvo-scroll: calls=32 queued=32 dirty=3 moves=16 reused_pixels=3989240
+korvo-ppa: copy=16 fill=119 flush=51 blend=225 errors=0
+WIDGET_COMPARISON_DONE

@@ -7,7 +7,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
-#include <math.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,15 +20,13 @@
 #include <unistd.h>
 #include "linux_console.h"
 
-#define SAMPLE_RATE 22050
 #define SONG_SECONDS 14
-#define PI 3.14159265358979323846
 
 static pid_t player = -1;
 static lv_obj_t *status_label;
 static lv_obj_t *time_label;
 static uint64_t play_started_ms;
-static const char *song_path = "/tmp/korvo-lvgl-demo.wav";
+static const char *song_path = "/usr/share/sounds/korvo-lvgl-demo.wav";
 static volatile sig_atomic_t running = 1;
 static int go_home;
 
@@ -49,40 +46,6 @@ static void home_cb(lv_event_t *e)
     (void)e;
     go_home = 1;
     running = 0;
-}
-
-static void write_demo_wav(void)
-{
-    const uint32_t frames = SAMPLE_RATE * SONG_SECONDS;
-    FILE *f = fopen(song_path, "wb");
-    if(!f) return;
-    uint32_t data_bytes = frames * 4;
-    uint8_t h[44] = { 'R','I','F','F' };
-    uint32_t riff_size = data_bytes + 36, byte_rate = SAMPLE_RATE * 4;
-    uint16_t one = 1, channels = 2, align = 4, bits = 16;
-    memcpy(h + 4, &riff_size, 4); memcpy(h + 8, "WAVEfmt ", 8);
-    uint32_t fmt_size = 16; memcpy(h + 16, &fmt_size, 4);
-    memcpy(h + 20, &one, 2); memcpy(h + 22, &channels, 2);
-    memcpy(h + 24, &((uint32_t){SAMPLE_RATE}), 4);
-    memcpy(h + 28, &byte_rate, 4); memcpy(h + 32, &align, 2);
-    memcpy(h + 34, &bits, 2); memcpy(h + 36, "data", 4);
-    memcpy(h + 40, &data_bytes, 4); fwrite(h, 1, sizeof(h), f);
-
-    /* A short original chiptune-style melody, stored as stereo PCM WAV. */
-    static const double notes[] = { 523.25,659.25,783.99,659.25,587.33,698.46,
-                                    880.00,698.46,523.25,659.25,783.99,1046.5,
-                                    880.00,783.99,659.25,523.25 };
-    const uint32_t note_frames = frames / (sizeof(notes) / sizeof(notes[0]));
-    for(uint32_t i = 0; i < frames; ++i) {
-        uint32_t n = (i / note_frames) % (sizeof(notes) / sizeof(notes[0]));
-        uint32_t pos = i % note_frames;
-        double edge = pos < 350 ? pos / 350.0 : (note_frames - pos < 650 ? (note_frames - pos) / 650.0 : 1.0);
-        double phase = (double)i * notes[n] * 2.0 * PI / SAMPLE_RATE;
-        double s = (sin(phase) + 0.22 * sin(phase * 2.0) + 0.08 * sin(phase * 3.0)) * edge * 0.22;
-        int16_t sample = (int16_t)(s * 32767.0);
-        fwrite(&sample, sizeof(sample), 1, f); fwrite(&sample, sizeof(sample), 1, f);
-    }
-    fclose(f);
 }
 
 static char *find_touch(void)
@@ -110,12 +73,6 @@ static char *find_touch(void)
     return found;
 }
 
-static void make_wav(void)
-{
-    struct stat st;
-    if(stat(song_path, &st) || st.st_size < 44) write_demo_wav();
-}
-
 static void stop_audio(void)
 {
     if(player > 0) {
@@ -134,7 +91,6 @@ static void play_cb(lv_event_t *e)
 {
     (void)e;
     if(player > 0) { set_status("Already playing"); return; }
-    make_wav();
     if(access(song_path, R_OK)) { set_status("Could not prepare demo audio"); return; }
     player = fork();
     if(player == 0) {
@@ -267,14 +223,21 @@ int main(void)
     lv_obj_t *home = make_button(lv_layer_top(), "HOME", 90, 40, home_cb);
     lv_obj_align(home, LV_ALIGN_TOP_RIGHT, -4, 4);
     while(running) {
-        lv_timer_handler();
-        { struct timespec delay = {0, 5000000L}; nanosleep(&delay, NULL); }
+        uint32_t delay_ms = lv_timer_handler();
+        if(delay_ms > 33) delay_ms = 33;
+        if(delay_ms < 2) delay_ms = 2;
+        struct timespec delay = {0, delay_ms * 1000000L};
+        nanosleep(&delay, NULL);
     }
     stop_audio();
     lv_deinit();
     if(go_home) {
         console_prepare_exec();
-        execl("/usr/bin/korvo-ui", "korvo-ui", "menu", (char *)NULL);
+        char executable[256];
+        ssize_t count = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+        if(count >= 0) executable[count] = 0;
+        const char *launcher = count >= 0 && strstr(executable, "lvgl-music-demo-extra") ? "/usr/bin/korvo-ui-extra" : "/usr/bin/korvo-ui";
+        execl(launcher, launcher, "menu", (char *)NULL);
     }
     return 0;
 }

@@ -108,6 +108,18 @@ int main(int argc, char **argv)
         }
     }
     puts("PPA RGB565 / ARGB8888 / supported A8 alpha blends: OK");
+    if(info.capabilities & KORVO_PPA_CAP_IMMUTABLE_A8) {
+        for(unsigned i = 0; i < info.buffer_size / 2; i++) a[i] = 0x001f;
+        q.format = KORVO_PPA_A8 | KORVO_PPA_SOURCE_CLEAN;
+        if(ioctl(fd, KORVO_PPA_IOC_RUN, &q)) die("immutable A8 blend");
+        for(unsigned y = 0; y < 64; y++) for(unsigned x = 0; x < 128; x++) {
+            uint16_t v = a[y * 128 + x];
+            if(y >= 7 && y < 32 && x >= 10 && x < 58) {
+                if((v >> 11) < 15 || (v >> 11) > 16 || (v & 31) < 14 || (v & 31) > 16 || (v & 0x7e0)) return 1;
+            } else if(v != 0x001f) return 1;
+        }
+        puts("Immutable A8 mask reuse and surrounding pixels: OK");
+    }
     q.operation = KORVO_PPA_FILL; q.format = 0;
     q.destination.offset = info.render_buffer_size;
     errno = 0;
@@ -115,6 +127,33 @@ int main(int argc, char **argv)
         fputs("out-of-bounds request was not rejected\n", stderr); return 1;
     }
     puts("Out-of-bounds request rejected: OK");
+    if(info.capabilities & KORVO_PPA_CAP_BATCH) {
+        struct korvo_ppa_batch batch = {0};
+        batch.count = 3;
+        for(unsigned i = 0; i < 3; i++) {
+            batch.requests[i] = (struct korvo_ppa_request){
+                .operation = KORVO_PPA_FILL, .destination = {0, 0, 128, 64},
+                .destination_x = i * 16, .destination_y = 4, .width = 32, .height = 16,
+                .color = colors[i], .alpha = 255};
+        }
+        for(unsigned i = 0; i < 128 * 64; i++) a[i] = 0x1234;
+        if(ioctl(fd, KORVO_PPA_IOC_BATCH, &batch) || batch.completed != 3) die("batch");
+        for(unsigned y = 0; y < 64; y++) for(unsigned x = 0; x < 128; x++) {
+            uint16_t expected = 0x1234;
+            if(y >= 4 && y < 20 && x < 64) expected = colors[x >= 32 ? 2 : x >= 16 ? 1 : 0];
+            if(a[y * 128 + x] != expected) { fputs("batch ordering/guard mismatch\n", stderr); return 1; }
+        }
+        batch.count = 0; errno = 0;
+        if(ioctl(fd, KORVO_PPA_IOC_BATCH, &batch) != -1 || errno != EINVAL) return 1;
+        batch.count = KORVO_PPA_BATCH_MAX + 1; errno = 0;
+        if(ioctl(fd, KORVO_PPA_IOC_BATCH, &batch) != -1 || errno != EINVAL) return 1;
+        batch.count = 3; batch.requests[1].destination.offset = info.render_buffer_size;
+        errno = 0;
+        if(ioctl(fd, KORVO_PPA_IOC_BATCH, &batch) != -1 || errno != EINVAL || batch.completed != 1) {
+            fputs("batch partial completion/bounds mismatch\n", stderr); return 1;
+        }
+        puts("Batch ordering, guard pixels, count bounds and partial completion: OK");
+    }
     munmap(a, info.buffer_size); munmap(b, info.buffer_size);
 stats:
     if(ioctl(fd, KORVO_PPA_IOC_STATS, &stats)) die("stats");

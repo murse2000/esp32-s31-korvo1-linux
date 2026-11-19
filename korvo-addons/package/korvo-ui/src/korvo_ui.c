@@ -25,7 +25,8 @@ static const char *self;
 static char self_path[4096];
 static unsigned render_scene;
 static int camera_fd = -1;
-static unsigned char camera_pixels[240 * 240 * 2];
+#define CAMERA_BYTES (240U * 240U * 2U)
+static unsigned char *camera_pixels;
 static lv_image_dsc_t camera_image;
 static lv_obj_t *camera_view, *camera_status;
 static unsigned camera_frames;
@@ -112,9 +113,9 @@ static void render_next(lv_timer_t *timer)
 static void camera_update(lv_timer_t *timer)
 {
     (void)timer;
-    ssize_t n = read(camera_fd, camera_pixels, sizeof(camera_pixels));
-    if(n != sizeof(camera_pixels)) return;
-    camera_to_rgb565(camera_pixels, sizeof(camera_pixels), camera_format);
+    ssize_t n = read(camera_fd, camera_pixels, CAMERA_BYTES);
+    if(n != (ssize_t)CAMERA_BYTES) return;
+    camera_to_rgb565(camera_pixels, CAMERA_BYTES, camera_format);
     lv_obj_invalidate(camera_view);
     lv_label_set_text_fmt(camera_status, "Camera 240x240\nFrames: %u", ++camera_frames);
     if(camera_frames == 1) { puts("korvo-ui: first camera frame displayed"); fflush(stdout); }
@@ -129,7 +130,7 @@ static void camera_save(lv_event_t *event)
     if(!f) { lv_label_set_text(camera_status, "Could not save to microSD"); return; }
     fprintf(f, "P6\n240 240\n255\n");
     int failed = 0;
-    for(unsigned i = 0; i < sizeof(camera_pixels); i += 2) {
+    for(unsigned i = 0; i < CAMERA_BYTES; i += 2) {
         uint16_t px = camera_pixels[i] | ((uint16_t)camera_pixels[i + 1] << 8);
         unsigned char rgb[] = { ((px >> 11) & 31) * 255 / 31,
                                ((px >> 5) & 63) * 255 / 63, (px & 31) * 255 / 31 };
@@ -148,8 +149,13 @@ static void camera_screen(void)
         return;
     }
     struct v4l2_format fmt = {.type = V4L2_BUF_TYPE_VIDEO_CAPTURE};
-    if(ioctl(camera_fd, VIDIOC_G_FMT, &fmt) || fmt.fmt.pix.sizeimage != sizeof(camera_pixels)) {
+    if(ioctl(camera_fd, VIDIOC_G_FMT, &fmt) || fmt.fmt.pix.sizeimage != CAMERA_BYTES) {
         lv_label_set_text(camera_status, "Camera format unavailable");
+        close(camera_fd); camera_fd = -1; return;
+    }
+    camera_pixels = calloc(1, CAMERA_BYTES);
+    if(!camera_pixels) {
+        lv_label_set_text(camera_status, "Not enough memory for camera");
         close(camera_fd); camera_fd = -1; return;
     }
     camera_format = fmt.fmt.pix.pixelformat;
@@ -157,7 +163,7 @@ static void camera_screen(void)
     camera_image.header.cf = LV_COLOR_FORMAT_RGB565;
     camera_image.header.w = 240; camera_image.header.h = 240;
     camera_image.header.stride = 480;
-    camera_image.data_size = sizeof(camera_pixels);
+    camera_image.data_size = CAMERA_BYTES;
     camera_image.data = camera_pixels;
     camera_view = lv_image_create(lv_screen_active());
     lv_image_set_src(camera_view, &camera_image);
@@ -209,7 +215,8 @@ int main(int argc, char **argv)
     }
     if(!strcmp(demo, "audio")) {
         console_prepare_exec();
-        execl("/usr/bin/lvgl-music-demo", "lvgl-music-demo", (char *)NULL);
+        const char *player = strstr(self, "korvo-ui-extra") ? "/usr/bin/lvgl-music-demo-extra" : "/usr/bin/lvgl-music-demo";
+        execl(player, player, (char *)NULL);
         perror("lvgl-music-demo");
         return 1;
     }
@@ -247,6 +254,7 @@ int main(int argc, char **argv)
     if(camera_fd >= 0) close(camera_fd);
     if(camera_frames) printf("korvo-ui: displayed %u camera frames\n", camera_frames);
     lv_deinit();
+    free(camera_pixels);
     if(next_demo) {
         console_prepare_exec();
         execl(self, self, next_demo, (char *)NULL);

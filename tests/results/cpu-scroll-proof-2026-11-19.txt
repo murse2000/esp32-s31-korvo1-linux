@@ -1,0 +1,122 @@
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=9276049 render_us=9274748 cpu_us=4694897 cpu_pct=50 minflt=1377 majflt=18
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=180 flush=90 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=6511847 render_us=6510977 cpu_us=3356052 cpu_pct=51 minflt=242 majflt=1
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+PASS vertical: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll-x frames=90 wall_us=5745548 render_us=5744401 cpu_us=3348013 cpu_pct=58 minflt=206 majflt=2
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=331 flush=90 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll-x frames=90 wall_us=6003113 render_us=6002009 cpu_us=3267933 cpu_pct=54 minflt=790 majflt=20
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23344433
+korvo-ppa: copy=89 fill=270 flush=90 blend=0 errors=0
+PASS horizontal: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=10106065 render_us=10104950 cpu_us=4538432 cpu_pct=44 minflt=1442 majflt=9
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=180 flush=90 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=4924687 render_us=4923924 cpu_us=3337517 cpu_pct=67 minflt=214 majflt=2
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=2 moves=88 reused_pixels=22808896
+korvo-ppa: copy=88 fill=268 flush=90 blend=0 errors=0
+PASS changed: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=8485425 render_us=8484518 cpu_us=4613833 cpu_pct=54 minflt=802 majflt=3
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=180 flush=90 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=4533567 render_us=4532606 cpu_us=3262904 cpu_pct=71 minflt=124 majflt=1
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=1
+korvo-scroll: calls=89 queued=89 dirty=1 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+PASS small-change: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=7188054 render_us=7187228 cpu_us=4314013 cpu_pct=60 minflt=284 majflt=1
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=267 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=180 flush=90 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=6431878 render_us=6431095 cpu_us=3471706 cpu_pct=53 minflt=1310 majflt=8
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=267 queued=267 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=269 flush=90 blend=0 errors=0
+PASS coalesced: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=7939112 render_us=7938279 cpu_us=4481308 cpu_pct=56 minflt=1418 majflt=10
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=90 flush=90 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=6141618 render_us=6140662 cpu_us=3333731 cpu_pct=54 minflt=257 majflt=1
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=357 flush=90 blend=0 errors=0
+PASS transparent: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=7904760 render_us=7903789 cpu_us=4065755 cpu_pct=51 minflt=688 majflt=2
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=91 flush=90 blend=1 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=5956366 render_us=5955246 cpu_us=3279237 cpu_pct=55 minflt=310 majflt=16
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=24756240
+korvo-ppa: copy=89 fill=358 flush=90 blend=1 errors=0
+PASS tabview: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=7413066 render_us=7412172 cpu_us=4494664 cpu_pct=60 minflt=447 majflt=2
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=231 flush=90 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=90 wall_us=7115645 render_us=7114852 cpu_us=3637100 cpu_pct=51 minflt=1214 majflt=14
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=89 queued=89 dirty=0 moves=89 reused_pixels=23068088
+korvo-ppa: copy=89 fill=327 flush=90 blend=0 errors=0
+PASS custom: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=6 wall_us=1165734 render_us=1165663 cpu_us=849793 cpu_pct=72 minflt=92 majflt=2
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=5 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=12 flush=6 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=6 wall_us=1932041 render_us=1931972 cpu_us=805116 cpu_pct=41 minflt=321 majflt=1
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=5 queued=5 dirty=0 moves=5 reused_pixels=1295960
+korvo-ppa: copy=5 fill=17 flush=6 blend=0 errors=0
+PASS floating: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=6 wall_us=1338903 render_us=1338688 cpu_us=864354 cpu_pct=64 minflt=119 majflt=2
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=5 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=12 flush=6 blend=6 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=6 wall_us=1091877 render_us=1091809 cpu_us=788349 cpu_pct=72 minflt=91 majflt=0
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=5 queued=5 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=12 flush=6 blend=6 errors=0
+PASS overlay: all captured frames match exactly
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=6 wall_us=1345108 render_us=1345037 cpu_us=871746 cpu_pct=64 minflt=77 majflt=1
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=5 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=6 flush=6 blend=0 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas
+interaction scroll frames=6 wall_us=2494646 render_us=2494572 cpu_us=944400 cpu_pct=37 minflt=409 majflt=25
+korvo-cache: hits=0 misses=0 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-scroll: calls=5 queued=5 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=6 flush=6 blend=0 errors=0
+PASS gradient: all captured frames match exactly
+Scroll reuse pixel comparison passed.

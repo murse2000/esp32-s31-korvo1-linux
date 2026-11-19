@@ -16,6 +16,12 @@
 #define KORVO_PPA_A8 2U
 #define KORVO_PPA_CAP_A8 (1U << 8)
 #define KORVO_PPA_CAP_IRQ (1U << 9)
+#define KORVO_PPA_CAP_BATCH (1U << 10)
+#define KORVO_PPA_CAP_IMMUTABLE_A8 (1U << 11)
+/* A8 scratch source already synchronized in full by an earlier request.
+ * The exclusive owner must not have written any of its bytes since then. */
+#define KORVO_PPA_SOURCE_CLEAN (1U << 16)
+#define KORVO_PPA_BATCH_MAX 16U
 struct korvo_ppa_info {
     __u32 abi, buffer_size, buffers, capabilities;
     __u32 screen_width, screen_height, render_buffer_size, reserved;
@@ -30,7 +36,12 @@ struct korvo_ppa_request {
 struct korvo_ppa_stats {
     __u64 copies, fills, flushes, blends, errors, bytes, nanoseconds;
 };
+struct korvo_ppa_batch {
+    __u32 count, completed;
+    struct korvo_ppa_request requests[KORVO_PPA_BATCH_MAX];
+};
 #define KORVO_PPA_IOC_INFO _IOR('P', 0x40, struct korvo_ppa_info)
 #define KORVO_PPA_IOC_RUN _IOW('P', 0x41, struct korvo_ppa_request)
 #define KORVO_PPA_IOC_STATS _IOR('P', 0x42, struct korvo_ppa_stats)
+#define KORVO_PPA_IOC_BATCH _IOWR('P', 0x43, struct korvo_ppa_batch)
 #endif

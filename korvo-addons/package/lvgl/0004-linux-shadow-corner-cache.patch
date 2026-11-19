@@ -1,0 +1,49 @@
+From: Korvo Linux project
+Subject: [PATCH] sw: allow exact shadow corner reuse by the Linux port
+
+The optional cache keeps alternating radii in already reserved canvas memory.
+Other ports retain the existing one-entry shadow cache and identical masks.
+
+--- a/src/draw/sw/lv_draw_sw_box_shadow.c
++++ b/src/draw/sw/lv_draw_sw_box_shadow.c
+@@ -25,6 +25,10 @@
+ /*********************
+  *      DEFINES
+  *********************/
++#ifdef __linux__
++extern uint8_t * korvo_lvgl_shadow_cache(int, int, int) __attribute__((weak));
++#endif
++
+ #define SHADOW_UPSCALE_SHIFT    6
+ #define SHADOW_ENHANCE          1
+ 
+@@ -99,6 +103,15 @@
+ 
+     lv_opa_t * sh_buf;
+ 
++    const uint8_t * external_cache = NULL;
++#ifdef __linux__
++    if(korvo_lvgl_shadow_cache) external_cache = korvo_lvgl_shadow_cache(corner_size, r_sh, 0);
++#endif
++    if(external_cache) {
++        sh_buf = lv_malloc(corner_size * corner_size);
++        lv_memcpy(sh_buf, external_cache, corner_size * corner_size);
++    }
++    else {
+ #if LV_DRAW_SW_SHADOW_CACHE_SIZE
+     lv_draw_sw_shadow_cache_t * cache = &shadow_cache;
+     if(cache->cache_size == corner_size && cache->cache_r == r_sh) {
+@@ -122,6 +135,13 @@
+     sh_buf = lv_malloc(corner_size * corner_size * sizeof(uint16_t));
+     shadow_draw_corner_buf(&core_area, (uint16_t *)sh_buf, dsc->width, r_sh);
+ #endif /*LV_DRAW_SW_SHADOW_CACHE_SIZE*/
++#ifdef __linux__
++        if(korvo_lvgl_shadow_cache) {
++            uint8_t * storage = korvo_lvgl_shadow_cache(corner_size, r_sh, 1);
++            if(storage) lv_memcpy(storage, sh_buf, corner_size * corner_size);
++        }
++#endif
++    }
+ 
+     /*Skip a lot of masking if the background will cover the shadow that would be masked out*/
+     bool simple = dsc->bg_cover;

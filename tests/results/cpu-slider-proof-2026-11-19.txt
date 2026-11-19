@@ -1,0 +1,13 @@
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas (extra)
+interaction slider frames=90 wall_us=5821141 render_us=5820129 cpu_us=2844179 cpu_pct=48 minflt=640 majflt=3
+korvo-cache: hits=0 misses=1 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-shadow: hits=0 misses=0
+korvo-scroll: calls=0 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=90 flush=90 blend=192 errors=0
+korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, DIRECT canvas (extra)
+interaction slider frames=90 wall_us=3879569 render_us=3878621 cpu_us=2433607 cpu_pct=62 minflt=535 majflt=20
+korvo-cache: hits=0 misses=1 batch_calls=0 batch_commands=0 dirty_reused=0
+korvo-shadow: hits=0 misses=0
+korvo-scroll: calls=0 queued=0 dirty=0 moves=0 reused_pixels=0
+korvo-ppa: copy=0 fill=164 flush=90 blend=192 errors=0
+PASS slider: all captured frames match exactly; explicit hardware fill offload exercised.

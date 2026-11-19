@@ -6,7 +6,9 @@
 #include "korvo_ppa_lvgl.h"
 #include "korvo_ppa.h"
 #include <src/draw/lv_draw_private.h>
+#include <src/draw/lv_draw_label_private.h>
 #include <src/draw/sw/lv_draw_sw.h>
+#include <src/draw/sw/blend/lv_draw_sw_blend_private.h>
 #include <src/draw/sw/lv_draw_sw_mask_private.h>
 #include <src/display/lv_display_private.h>
 #include <src/core/lv_obj_draw_private.h>
@@ -26,11 +28,21 @@
 #include <unistd.h>
 
 #define DRAW_ID 203
+#define MASK_CACHE_COUNT 16
+struct mask_entry {
+    unsigned valid, offset, bytes, kind, clean;
+    int w, h, radius, x, y, opa;
+    const lv_font_t *font;
+    int letter_space, line_space, ofs_x, ofs_y;
+    unsigned align, bidi, flags;
+    char text[192];
+};
 struct ppa_display {
     int fd, fb;
     uint8_t *buffer[2], *pixels;
     unsigned stride, size, render_size, capabilities;
-    int direct;
+    unsigned cpu_fill_limit;
+    int direct, extra_accel;
     int failed;
     struct korvo_ppa_stats initial;
     uint64_t sw_us[16], sw_count[16], operation_us[6], operation_count[6];
@@ -48,11 +60,66 @@ struct ppa_display {
     lv_area_t scroll_dynamic[24];
     unsigned scroll_dynamic_count;
     uint64_t scroll_dynamic_pixels;
+    struct mask_entry *cache, *building;
+    unsigned cache_next, cache_offset;
+    int cache_disabled, build_failed, batch_disabled, redraw_after_failure, collect_batch;
+    uint64_t cache_hits, cache_misses, batch_calls, batch_commands, batch_us, dirty_reused;
+    struct korvo_ppa_batch pending;
+    struct { int size, radius; unsigned valid; } shadow[3];
+    unsigned shadow_next;
+    uint8_t *shadow_data;
+    uint64_t shadow_hits, shadow_misses;
 };
 struct ppa_unit { lv_draw_unit_t base; struct ppa_display *ctx; };
 static struct ppa_display *profile_ctx;
 static struct ppa_display *active_ctx;
+/* Optional LVGL SW shadow hook: keep three exact, unmodified corner masks
+ * in the reserved canvas tail instead of recalculating alternating radii. */
+uint8_t *korvo_lvgl_shadow_cache(int size, int radius, int create)
+{
+    struct ppa_display *c = active_ctx;
+    if(!c || !c->extra_accel || !c->shadow_data || c->cache_disabled || size <= 0 || size > 64) return NULL;
+    for(unsigned i = 0; i < 3; i++)
+        if(c->shadow[i].valid && c->shadow[i].size == size && c->shadow[i].radius == radius) {
+            if(!create) c->shadow_hits++;
+            return c->shadow_data + i * 4096;
+        }
+    if(!create) { c->shadow_misses++; return NULL; }
+    unsigned slot = c->shadow_next++ % 3;
+    c->shadow[slot].size = size; c->shadow[slot].radius = radius; c->shadow[slot].valid = 1;
+    return c->shadow_data + slot * 4096;
+}
 static int submit(struct ppa_display *c, struct korvo_ppa_request *q);
+static int drain(struct ppa_display *c);
+static int queue(struct ppa_display *c, struct korvo_ppa_request *q);
+static void mark_clean(struct ppa_display *c, const struct korvo_ppa_request *q)
+{
+    if(q->operation != KORVO_PPA_BLEND || (q->format & ~KORVO_PPA_SOURCE_CLEAN) != KORVO_PPA_A8 ||
+       q->source.buffer != 1) return;
+    for(unsigned i = 0; i < c->cache_next; i++) {
+        struct mask_entry *entry = &c->cache[i];
+        if(entry->valid == 1 && entry->offset == q->source.offset &&
+           entry->w == (int)q->source.width && entry->h == (int)q->source.height) entry->clean = 1;
+    }
+}
+static void scratch_reset(struct ppa_display *c)
+{
+    if(c->pending.count) drain(c);
+    if(c->cache && c->cache_next) memset(c->cache, 0, MASK_CACHE_COUNT * sizeof(*c->cache));
+    c->cache_offset = c->cache_next = 0;
+}
+static struct mask_entry *mask_allocate(struct ppa_display *c, unsigned bytes)
+{
+    if(!c->cache || c->cache_disabled || bytes > KORVO_PPA_BUFFER_SIZE) return NULL;
+    bytes = (bytes + 3) & ~3U;
+    if(c->cache_next == MASK_CACHE_COUNT || bytes > KORVO_PPA_BUFFER_SIZE - c->cache_offset)
+        scratch_reset(c);
+    struct mask_entry *entry = &c->cache[c->cache_next++];
+    memset(entry, 0, sizeof(*entry));
+    entry->offset = c->cache_offset; entry->bytes = bytes;
+    c->cache_offset += bytes;
+    return entry;
+}
 /* LVGL timer busy time includes DMA waits and page-in stalls. Account Linux
  * CPU time instead; idle+iowait do not consume the application's CPU.
  */
@@ -239,7 +306,6 @@ static int scroll_region(struct ppa_display *c, lv_obj_t *obj, lv_area_t *outer,
 bool korvo_lvgl_scroll(lv_obj_t *obj, int32_t x, int32_t y)
 {
     struct ppa_display *c = active_ctx;
-    lv_area_t outer, inner;
     if(c) c->scroll_calls++;
     if(c && c->profile && c->scroll_logged < 4 && lv_obj_is_scrolling(obj)) {
         lv_obj_t *parent = lv_obj_get_parent(obj);
@@ -261,13 +327,16 @@ bool korvo_lvgl_scroll(lv_obj_t *obj, int32_t x, int32_t y)
     if(!c || !c->direct || c->failed || c->scroll_disabled ||
        lv_obj_get_display(obj) != c->display || c->display->rendering_in_progress ||
        lv_obj_get_screen(obj) != lv_display_get_screen_active(c->display) ||
-       c->display->flushing || !scroll_region(c, obj, &outer, &inner)) return false;
+       c->display->flushing) return false;
     if(c->scroll_obj && c->scroll_obj != obj) {
         if(lv_obj_is_valid(c->scroll_obj)) lv_obj_invalidate(c->scroll_obj);
         c->scroll_obj = NULL; c->scroll_x = c->scroll_y = 0;
         return false;
     }
-    if(!c->scroll_obj) { c->scroll_obj = obj; c->scroll_outer = outer; }
+    if(!c->scroll_obj) {
+        c->scroll_obj = obj;
+        lv_obj_get_coords(obj, &c->scroll_outer);
+    }
     c->scroll_x += x; c->scroll_y += y;
     c->scroll_queued++;
     lv_timer_resume(c->display->refr_timer);
@@ -288,20 +357,31 @@ static void scroll_refresh(lv_event_t *event)
     c->scroll_obj = NULL; c->scroll_x = c->scroll_y = 0;
     if(!lv_obj_is_valid(obj)) { lv_obj_invalidate(lv_screen_active()); return; }
     lv_area_t outer, inner, intersection;
-    if(!scroll_region(c, obj, &outer, &inner) || memcmp(&outer, &c->scroll_outer, sizeof(outer)) ||
+    lv_obj_get_coords(obj, &outer);
+    if(memcmp(&outer, &c->scroll_outer, sizeof(outer)) || !scroll_region(c, obj, &outer, &inner) ||
        abs(dx) >= lv_area_get_width(&inner) / 2 || abs(dy) >= lv_area_get_height(&inner) / 2) {
         lv_obj_invalidate(obj); return;
     }
-    /* Existing dirty pixels cannot be used as a source. Style/animation and
-     * content changes therefore keep the normal complete redraw path.
-     */
+    /* Reuse only unchanged pixels; redraw bounded dirty regions and their
+     * shifted ghosts. Large updates still take the full redraw path. */
+    if(!dx && !dy) return;
+    c->scroll_dynamic_count = 0; c->scroll_dynamic_pixels = 0;
+    unsigned dirty_count = 0;
     for(unsigned i = 0; i < c->display->inv_p; i++)
         if(lv_area_intersect(&intersection, &inner, &c->display->inv_areas[i])) {
             c->scroll_dirty++;
-            lv_obj_invalidate(obj); return;
+            /* Redraw both the changed coordinates and their shifted ghost.
+             * This handles invalidation before or after the scroll event.
+             */
+            lv_area_t shifted = intersection, combined;
+            lv_area_move(&shifted, dx, dy);
+            lv_area_join(&combined, &intersection, &shifted);
+            lv_area_intersect(&combined, &combined, &inner);
+            if(c->scroll_dynamic_count == 24) { lv_obj_invalidate(obj); return; }
+            c->scroll_dynamic[c->scroll_dynamic_count++] = combined;
+            c->scroll_dynamic_pixels += (uint64_t)lv_area_get_width(&combined) * lv_area_get_height(&combined);
+            dirty_count++;
         }
-    if(!dx && !dy) return;
-    c->scroll_dynamic_count = 0; c->scroll_dynamic_pixels = 0;
     if(!dynamic_regions(c, obj, &inner, dx, dy) || c->scroll_dynamic_pixels >
        (uint64_t)lv_area_get_width(&inner) * lv_area_get_height(&inner) / 2) {
         lv_obj_invalidate(obj); return;
@@ -340,6 +420,7 @@ static void scroll_refresh(lv_event_t *event)
                      c->buffer[0] + (y - dy) * 1600 + (dst.x1 - dx) * 2, bytes);
     }
     c->scroll_moves++; c->scroll_pixels += (uint64_t)rows * bytes / 2;
+    if(dirty_count) c->dirty_reused++;
     c->scroll_flush_area = outer; c->scroll_flush_pending = 1;
     invalidate_rect(obj, outer.x1, outer.y1, outer.x2, inner.y1 - 1);
     invalidate_rect(obj, outer.x1, inner.y2 + 1, outer.x2, outer.y2);
@@ -355,7 +436,10 @@ static void scroll_refresh(lv_event_t *event)
 static int32_t profile_sw(lv_draw_unit_t *unit, lv_layer_t *layer)
 {
     struct ppa_display *c = profile_ctx;
+    if(!c->pending.count && !c->profile) return c->sw_dispatch(unit, layer);
     lv_draw_task_t *t = lv_draw_get_next_available_task(layer, NULL, 1);
+    if(t) drain(c);
+    if(!c->profile) return c->sw_dispatch(unit, layer);
     unsigned type = t ? t->type : 15;
     uint64_t start = microseconds();
     int32_t result = c->sw_dispatch(unit, layer);
@@ -368,6 +452,7 @@ static int32_t profile_sw(lv_draw_unit_t *unit, lv_layer_t *layer)
 
 static int submit(struct ppa_display *c, struct korvo_ppa_request *q)
 {
+    if(c->pending.count && drain(c)) return -1;
     if(c->failed) return -1;
     uint64_t start = c->profile ? microseconds() : 0;
     int ret = ioctl(c->fd, KORVO_PPA_IOC_RUN, q);
@@ -375,11 +460,64 @@ static int submit(struct ppa_display *c, struct korvo_ppa_request *q)
         c->operation_us[q->operation] += microseconds() - start;
         c->operation_count[q->operation]++;
     }
-    if(!ret) return 0;
+    if(!ret) { mark_clean(c, q); return 0; }
     fprintf(stderr, "korvo-ppa: operation %u failed: %s; using software fallback\n",
             q->operation, strerror(errno));
     c->failed = 1;
     return -1;
+}
+static void replay_opaque(struct ppa_display *c, const struct korvo_ppa_request *q)
+{
+    /* Completed operations are never replayed. A failed opaque fill is safe
+     * to repeat. Blend failures schedule a complete redraw below.
+     */
+    if(q->operation != KORVO_PPA_FILL) return;
+    for(unsigned y = 0; y < q->height; y++) {
+        uint16_t *row = (void *)(c->buffer[0] + q->destination.offset +
+            ((q->destination_y + y) * q->destination.width + q->destination_x) * 2);
+        for(unsigned x = 0; x < q->width; x++) row[x] = q->color;
+    }
+}
+static int drain(struct ppa_display *c)
+{
+    if(!c->pending.count) return c->failed ? -1 : 0;
+    unsigned count = c->pending.count;
+    uint64_t start = c->profile ? microseconds() : 0;
+    c->pending.completed = 0;
+    int ret;
+    if(count == 1) {
+        ret = ioctl(c->fd, KORVO_PPA_IOC_RUN, &c->pending.requests[0]);
+        c->pending.completed = ret ? 0 : 1;
+    } else ret = ioctl(c->fd, KORVO_PPA_IOC_BATCH, &c->pending);
+    if(c->profile) c->batch_us += microseconds() - start;
+    for(unsigned i = 0; i < c->pending.completed; i++) mark_clean(c, &c->pending.requests[i]);
+    c->batch_calls++; c->batch_commands += count;
+    if(ret) {
+        for(unsigned i = c->pending.completed; i < count; i++) replay_opaque(c, &c->pending.requests[i]);
+        fprintf(stderr, "korvo-ppa: batch failed after %u/%u: %s; full redraw scheduled\n",
+                c->pending.completed, count, strerror(errno));
+        c->failed = 1;
+        c->redraw_after_failure = 1;
+    }
+    c->pending.count = 0;
+    return ret;
+}
+static int queue(struct ppa_display *c, struct korvo_ppa_request *q)
+{
+    if(c->failed) return -1;
+    if(c->batch_disabled || !(c->capabilities & KORVO_PPA_CAP_BATCH) ||
+       (!c->collect_batch && !c->pending.count)) return submit(c, q);
+    c->pending.requests[c->pending.count++] = *q;
+    if(c->pending.count == KORVO_PPA_BATCH_MAX) return drain(c);
+    return 0;
+}
+static void finish_frame(lv_event_t *event)
+{
+    struct ppa_display *c = lv_event_get_user_data(event);
+    if(c->redraw_after_failure) {
+        c->redraw_after_failure = 0;
+        lv_obj_invalidate(lv_display_get_screen_active(c->display));
+    }
 }
 static void round_area(lv_event_t *e)
 {
@@ -449,7 +587,7 @@ static int rect(struct ppa_display *c, lv_draw_task_t *t, lv_area_t *a,
     if((a->x1 - layer->buf_area.x1) & 1) a->x1++;
     if((lv_area_get_width(a)) & 1) a->x2--;
     unsigned w = lv_area_get_width(a), h = lv_area_get_height(a);
-    if(a->x2 < a->x1 || w * h < 512) return 0;
+    if(a->x2 < a->x1 || (w * h < 512 && t->type != LV_DRAW_TASK_TYPE_LABEL)) return 0;
     if(!layer->draw_buf) return 1; /* Evaluated before allocation on some layers. */
     lv_draw_buf_t *b = layer->draw_buf;
     uintptr_t start = (uintptr_t)b->data, base = (uintptr_t)c->buffer[0];
@@ -495,6 +633,15 @@ static int32_t evaluate(lv_draw_unit_t *unit, lv_draw_task_t *t)
         if(r > max_r) r = max_r;
         if(r && !((a.x1 >= t->area.x1 + r && a.x2 <= t->area.x2 - r) ||
                   (a.y1 >= t->area.y1 + r && a.y2 <= t->area.y2 - r))) return 0;
+    } else if(t->type == LV_DRAW_TASK_TYPE_LABEL) {
+        const lv_draw_label_dsc_t *d = t->draw_dsc;
+        uint64_t bytes = (uint64_t)lv_area_get_width(&t->area) * lv_area_get_height(&t->area);
+        if(!c->cache || c->cache_disabled || !(c->capabilities & KORVO_PPA_CAP_A8) ||
+           !d->text || strlen(d->text) >= sizeof(c->cache[0].text) ||
+           !d->font || d->font->get_glyph_bitmap != lv_font_get_bitmap_fmt_txt ||
+           d->decor || d->blend_mode != LV_BLEND_MODE_NORMAL ||
+           d->sel_start != LV_DRAW_LABEL_NO_TXT_SEL || d->sel_end != LV_DRAW_LABEL_NO_TXT_SEL ||
+           bytes < 1024 || bytes > KORVO_PPA_BUFFER_SIZE) return 0;
     } else if(t->type != LV_DRAW_TASK_TYPE_IMAGE || !image_supported(t)) return 0;
 supported:
     if(t->preference_score > 70) { t->preference_score = 70; t->preferred_draw_unit_id = DRAW_ID; }
@@ -503,6 +650,7 @@ supported:
 static int draw_image(struct ppa_display *c, lv_draw_task_t *t, const lv_area_t *a,
                       struct korvo_ppa_request *q)
 {
+    scratch_reset(c);
     const lv_draw_image_dsc_t *d = t->draw_dsc;
     const lv_image_dsc_t *im = d->src;
     unsigned bytes = im->header.cf == LV_COLOR_FORMAT_ARGB8888 ? 4 : 2;
@@ -532,13 +680,19 @@ static int draw_fill(lv_draw_unit_t *unit, struct ppa_display *c, lv_draw_task_t
                      struct korvo_ppa_request *q)
 {
     lv_draw_fill_dsc_t *d = t->draw_dsc;
+    int bar = 0;
+#if LV_USE_BAR
+    bar = d->base.obj && lv_obj_has_class(d->base.obj, &lv_bar_class);
+#endif
     q->color = lv_color_to_u16(d->color);
     int32_t radius = LV_MIN(d->radius, LV_MIN(lv_area_get_width(&t->area), lv_area_get_height(&t->area)) / 2);
     int solid = !radius ||
         (a->x1 >= t->area.x1 + radius && a->x2 <= t->area.x2 - radius) ||
         (a->y1 >= t->area.y1 + radius && a->y2 <= t->area.y2 - radius);
     if((solid || !(c->capabilities & KORVO_PPA_CAP_A8)) && d->opa == 255) {
-        if(radius && q->width * q->height <= 65536) {
+        unsigned limit = c->cpu_fill_limit;
+        if(radius && q->width * q->height <= limit) {
+            if(c->pending.count) drain(c);
             /* A short, wide control fits the cache. One plain CPU fill
              * beats DMA ownership handoffs and avoids per-pixel masks.
              */
@@ -549,8 +703,47 @@ static int draw_fill(lv_draw_unit_t *unit, struct ppa_display *c, lv_draw_task_t
             unit->clip_area = saved_clip;
             return 0;
         }
-        q->operation = KORVO_PPA_FILL; return submit(c, q);
+        q->operation = KORVO_PPA_FILL; return bar ? submit(c, q) : queue(c, q);
     }
+    unsigned full_w = lv_area_get_width(&t->area), full_h = lv_area_get_height(&t->area);
+    /* A slider's changing-width indicator repeatedly misses a full-shape
+     * cache and can cost more than drawing its small clipped mask. Keep
+     * bar/slider fills on the established clipped, synchronous path. */
+    if(!bar && c->cache && !c->cache_disabled && (uint64_t)full_w * full_h <= KORVO_PPA_BUFFER_SIZE) {
+        struct mask_entry *entry = NULL;
+        for(unsigned i = 0; i < c->cache_next; i++) {
+            struct mask_entry *test = &c->cache[i];
+            if(test->valid && test->kind == 1 && test->w == (int)full_w && test->h == (int)full_h &&
+               test->radius == radius && test->opa == d->opa) { entry = test; break; }
+        }
+        if(entry) c->cache_hits++;
+        else {
+            c->cache_misses++;
+            entry = mask_allocate(c, full_w * full_h);
+            if(!entry) return -1;
+            entry->kind = 1; entry->w = full_w; entry->h = full_h;
+            entry->radius = radius; entry->opa = d->opa;
+            uint8_t *mask = c->buffer[1] + entry->offset;
+            memset(mask, d->opa, full_w * full_h);
+            if(radius) {
+                lv_draw_sw_mask_radius_param_t parameter;
+                lv_area_t bounds = {0, 0, full_w - 1, full_h - 1};
+                lv_draw_sw_mask_radius_init(&parameter, &bounds, radius, false);
+                void *masks[2] = {&parameter, NULL};
+                for(unsigned y = 0; y < full_h; y++)
+                    if(lv_draw_sw_mask_apply(masks, mask + y * full_w, 0, y, full_w) == LV_DRAW_SW_MASK_RES_TRANSP)
+                        memset(mask + y * full_w, 0, full_w);
+                lv_draw_sw_mask_free_param(&parameter);
+            }
+            entry->valid = 1;
+        }
+        q->operation = KORVO_PPA_BLEND; q->format = KORVO_PPA_A8; q->alpha = 255;
+        if(entry->clean && (c->capabilities & KORVO_PPA_CAP_IMMUTABLE_A8)) q->format |= KORVO_PPA_SOURCE_CLEAN;
+        q->source = (struct korvo_ppa_surface){1, entry->offset, full_w, full_h};
+        q->source_x = a->x1 - t->area.x1; q->source_y = a->y1 - t->area.y1;
+        return queue(c, q);
+    }
+    scratch_reset(c);
     lv_draw_sw_mask_radius_param_t parameter;
     void *masks[2] = {&parameter, NULL};
     if(radius) lv_draw_sw_mask_radius_init(&parameter, &t->area, radius, false);
@@ -574,16 +767,93 @@ static int draw_fill(lv_draw_unit_t *unit, struct ppa_display *c, lv_draw_task_t
     if(radius) lv_draw_sw_mask_free_param(&parameter);
     return ret;
 }
+static void cache_glyph(lv_draw_unit_t *unit, lv_draw_glyph_dsc_t *glyph,
+                         lv_draw_fill_dsc_t *fill, const lv_area_t *fill_area)
+{
+    struct ppa_display *c = ((struct ppa_unit *)unit)->ctx;
+    struct mask_entry *entry = c->building;
+    if(fill || fill_area || !glyph || glyph->format <= LV_FONT_GLYPH_FORMAT_NONE ||
+       glyph->format >= LV_FONT_GLYPH_FORMAT_IMAGE || !glyph->glyph_data) { c->build_failed = 1; return; }
+    const lv_area_t *a = glyph->letter_coords;
+    if(a->x1 < 0 || a->y1 < 0 || a->x2 >= entry->w || a->y2 >= entry->h) {
+        c->build_failed = 1; return;
+    }
+    lv_draw_buf_t *bitmap = glyph->glyph_data;
+    for(int y = a->y1; y <= a->y2; y++) {
+        uint8_t *dst = c->buffer[1] + entry->offset + y * entry->w + a->x1;
+        const uint8_t *src = bitmap->data + (y - a->y1) * bitmap->header.stride;
+        for(int x = 0; x <= a->x2 - a->x1; x++) {
+            /* Separate overlapping alpha glyphs cannot be flattened without
+             * changing RGB565 rounding. Preserve LVGL's normal path. */
+            if(dst[x] && src[x]) c->build_failed = 1;
+            dst[x] |= src[x];
+        }
+    }
+}
+static int draw_label(struct ppa_display *c, lv_draw_unit_t *unit, lv_draw_task_t *t,
+                       const lv_area_t *a, struct korvo_ppa_request *q)
+{
+    (void)q;
+    const lv_draw_label_dsc_t *d = t->draw_dsc;
+    int w = lv_area_get_width(&t->area), h = lv_area_get_height(&t->area);
+    struct mask_entry *entry = NULL;
+    for(unsigned i = 0; i < c->cache_next; i++) {
+        struct mask_entry *test = &c->cache[i];
+        if(test->valid && test->kind == 2 && test->w == w && test->h == h && test->font == d->font &&
+           test->letter_space == d->letter_space && test->line_space == d->line_space &&
+           test->ofs_x == d->ofs_x && test->ofs_y == d->ofs_y && test->align == d->align &&
+           test->bidi == d->bidi_dir && test->flags == d->flag && !strcmp(test->text, d->text)) { entry = test; break; }
+    }
+    if(entry) {
+        c->cache_hits++;
+        if(entry->valid == 2) return -1;
+    }
+    else {
+        c->cache_misses++;
+        entry = mask_allocate(c, w * h);
+        if(!entry) return -1;
+        entry->kind = 2; entry->w = w; entry->h = h; entry->font = d->font;
+        entry->letter_space = d->letter_space; entry->line_space = d->line_space;
+        entry->ofs_x = d->ofs_x; entry->ofs_y = d->ofs_y; entry->align = d->align;
+        entry->bidi = d->bidi_dir; entry->flags = d->flag; strcpy(entry->text, d->text);
+        memset(c->buffer[1] + entry->offset, 0, w * h);
+        lv_draw_label_dsc_t normalized = *d;
+        normalized.hint = NULL; normalized.opa = 255;
+        lv_area_t bounds = {0, 0, w - 1, h - 1};
+        const lv_area_t *clip = unit->clip_area;
+        unit->clip_area = &bounds; c->building = entry; c->build_failed = 0;
+        lv_draw_label_iterate_characters(unit, &normalized, &bounds, cache_glyph);
+        unit->clip_area = clip; c->building = NULL;
+        if(c->build_failed) { entry->valid = 2; return -1; }
+        entry->valid = 1;
+    }
+    /* Use LVGL's exact RGB565 blend on the cached whole-label mask. This
+     * skips repeated layout/decoding without introducing clip-dependent
+     * hardware rounding between reused and newly exposed text pixels. */
+    if(c->pending.count) drain(c);
+    lv_draw_sw_blend_dsc_t blend = {0};
+    blend.color = d->color; blend.opa = d->opa;
+    blend.blend_area = &t->area; blend.mask_area = &t->area;
+    blend.mask_buf = c->buffer[1] + entry->offset; blend.mask_stride = w;
+    blend.mask_res = LV_DRAW_SW_MASK_RES_CHANGED;
+    const lv_area_t *saved_clip = unit->clip_area; unit->clip_area = a;
+    lv_draw_sw_blend(unit, &blend); unit->clip_area = saved_clip;
+    return 0;
+}
 static void software_task(lv_draw_unit_t *unit, lv_draw_task_t *t)
 {
+    struct ppa_display *c = ((struct ppa_unit *)unit)->ctx;
+    if(c->pending.count) drain(c);
     if(t->type == LV_DRAW_TASK_TYPE_FILL) lv_draw_sw_fill(unit, t->draw_dsc, &t->area);
+    else if(t->type == LV_DRAW_TASK_TYPE_LABEL) lv_draw_sw_label(unit, t->draw_dsc, &t->area);
     else lv_draw_sw_image(unit, t->draw_dsc, &t->area);
 }
-static int32_t dispatch(lv_draw_unit_t *unit, lv_layer_t *layer)
+static int32_t draw_one(lv_draw_unit_t *unit, lv_layer_t *layer)
 {
     struct ppa_display *c = ((struct ppa_unit *)unit)->ctx;
     lv_draw_task_t *t = lv_draw_get_next_available_task(layer, NULL, DRAW_ID);
-    if(!t || t->preferred_draw_unit_id != DRAW_ID) return 0;
+    if(!t || t->preferred_draw_unit_id != DRAW_ID) return LV_DRAW_UNIT_IDLE;
+    c->collect_batch = t->next != NULL;
     if(!lv_draw_layer_alloc_buf(layer)) return -1;
     unit->target_layer = layer; unit->clip_area = &t->clip_area;
     t->state = LV_DRAW_TASK_STATE_IN_PROGRESS;
@@ -593,7 +863,8 @@ static int32_t dispatch(lv_draw_unit_t *unit, lv_layer_t *layer)
     if(rect(c, t, &a, &q)) {
         if(t->type == LV_DRAW_TASK_TYPE_FILL) {
             ret = draw_fill(unit, c, t, &a, &q);
-        } else ret = draw_image(c, t, &a, &q);
+        } else if(t->type == LV_DRAW_TASK_TYPE_LABEL) ret = draw_label(c, unit, t, &a, &q);
+        else ret = draw_image(c, t, &a, &q);
     }
     if(ret) software_task(unit, t);
     else {
@@ -609,23 +880,51 @@ static int32_t dispatch(lv_draw_unit_t *unit, lv_layer_t *layer)
     }
     t->state = LV_DRAW_TASK_STATE_READY;
     lv_draw_dispatch_request();
-    return 1;
+    /* Most tasks are dispatched as they are created. Do not walk the task
+     * list again when this was its tail; only queued successors can batch. */
+    return t->next ? 2 : 1;
+}
+static int32_t dispatch(lv_draw_unit_t *unit, lv_layer_t *layer)
+{
+    struct ppa_display *c = ((struct ppa_unit *)unit)->ctx;
+    unsigned completed = 0;
+    int32_t result = 0;
+    /* Batch only within this unit's dispatch. Finish before yielding to SW,
+     * avoiding an extra dependency-list walk on every software dispatch. */
+    while(completed < KORVO_PPA_BATCH_MAX) {
+        result = draw_one(unit, layer);
+        if(result <= 0) break;
+        completed++;
+        if(result == 1) break;
+    }
+    if(c->pending.count) drain(c);
+    return completed ? 1 : result;
 }
 static void cleanup(lv_event_t *event)
 {
     struct ppa_display *c = lv_event_get_user_data(event);
+    drain(c);
     if(active_ctx == c) active_ctx = NULL;
     if(c->profile) {
+        fprintf(stderr, "ppa-profile: batch calls=%llu commands=%llu us=%llu\n",
+            (unsigned long long)c->batch_calls, (unsigned long long)c->batch_commands,
+            (unsigned long long)c->batch_us);
         for(unsigned i = 0; i < 16; i++) if(c->sw_count[i])
             fprintf(stderr, "ppa-profile: sw type=%u count=%llu us=%llu\n", i,
                 (unsigned long long)c->sw_count[i], (unsigned long long)c->sw_us[i]);
         for(unsigned i = 0; i < 6; i++) if(c->operation_count[i])
             fprintf(stderr, "ppa-profile: hw op=%u count=%llu us=%llu\n", i,
                 (unsigned long long)c->operation_count[i], (unsigned long long)c->operation_us[i]);
-        c->sw_unit->dispatch_cb = c->sw_dispatch;
-        profile_ctx = NULL;
     }
+    if(c->sw_unit) c->sw_unit->dispatch_cb = c->sw_dispatch;
+    profile_ctx = NULL;
     if(getenv("KORVO_UI_STATS")) {
+        fprintf(stderr, "korvo-cache: hits=%llu misses=%llu batch_calls=%llu batch_commands=%llu dirty_reused=%llu\n",
+            (unsigned long long)c->cache_hits, (unsigned long long)c->cache_misses,
+            (unsigned long long)c->batch_calls, (unsigned long long)c->batch_commands,
+            (unsigned long long)c->dirty_reused);
+        fprintf(stderr, "korvo-shadow: hits=%llu misses=%llu\n",
+            (unsigned long long)c->shadow_hits, (unsigned long long)c->shadow_misses);
         fprintf(stderr, "korvo-scroll: calls=%llu queued=%llu dirty=%llu moves=%llu reused_pixels=%llu\n",
                 (unsigned long long)c->scroll_calls, (unsigned long long)c->scroll_queued,
                 (unsigned long long)c->scroll_dirty, (unsigned long long)c->scroll_moves,
@@ -664,6 +963,19 @@ lv_display_t *korvo_ppa_display_create(void)
     for(unsigned i = 0; i < 2; i++) c->buffer[i] = mmap(NULL, i ? KORVO_PPA_BUFFER_SIZE : c->render_size,
             PROT_READ | PROT_WRITE, MAP_SHARED, c->fd, i * KORVO_PPA_BUFFER_SIZE);
     if(c->pixels == MAP_FAILED || c->buffer[0] == MAP_FAILED || c->buffer[1] == MAP_FAILED) goto fail;
+    if(c->direct && c->render_size >= 800 * 480 * 2 + MASK_CACHE_COUNT * sizeof(*c->cache)) {
+        /* Metadata occupies the existing reservation's unused tail; masks
+         * use the existing scratch allocation. No new framebuffer/cache RAM. */
+        c->cache = (void *)(c->buffer[0] + 800 * 480 * 2);
+        memset(c->cache, 0, MASK_CACHE_COUNT * sizeof(*c->cache));
+        if(c->render_size >= 800 * 480 * 2 + MASK_CACHE_COUNT * sizeof(*c->cache) + 3 * 4096)
+            c->shadow_data = c->buffer[0] + c->render_size - 3 * 4096;
+    }
+    c->extra_accel = 1;
+    c->cache_disabled = getenv("KORVO_CACHE_DISABLE") != NULL;
+    c->batch_disabled = getenv("KORVO_BATCH_DISABLE") != NULL;
+    const char *limit = getenv("KORVO_PPA_CPU_FILL_LIMIT");
+    c->cpu_fill_limit = limit ? strtoul(limit, NULL, 10) : 65536;
     ioctl(c->fd, KORVO_PPA_IOC_STATS, &c->initial);
     /* Match the software fbdev's unblank without restarting an active LCD. */
     ioctl(c->fb, FBIOBLANK, FB_BLANK_UNBLANK);
@@ -680,17 +992,20 @@ lv_display_t *korvo_ppa_display_create(void)
     lv_display_set_flush_cb(display, flush);
     lv_display_add_event_cb(display, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
     lv_display_add_event_cb(display, scroll_refresh, LV_EVENT_REFR_START, c);
+    lv_display_add_event_cb(display, finish_frame, LV_EVENT_REFR_READY, c);
     lv_display_add_event_cb(display, cleanup, LV_EVENT_DELETE, c);
     struct ppa_unit *unit = lv_draw_create_unit(sizeof(*unit));
-    unit->ctx = c; unit->base.evaluate_cb = evaluate; unit->base.dispatch_cb = dispatch;
+    unit->ctx = c;
+    unit->base.evaluate_cb = evaluate;
+    unit->base.dispatch_cb = dispatch;
     c->flush_only = getenv("KORVO_PPA_FLUSH_ONLY") != NULL;
-    c->profile = getenv("KORVO_PPA_PROFILE") != NULL && unit->base.next && unit->base.next->dispatch_cb;
-    if(c->profile) {
+    c->profile = getenv("KORVO_PPA_PROFILE") != NULL;
+    if(c->profile && unit->base.next && unit->base.next->dispatch_cb) {
         c->sw_unit = unit->base.next; c->sw_dispatch = c->sw_unit->dispatch_cb;
         profile_ctx = c; c->sw_unit->dispatch_cb = profile_sw;
     }
-    fprintf(stderr, "korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, %s\n",
-            c->direct ? "DIRECT canvas" : "partial tiles");
+    fprintf(stderr, "korvo-ppa: PPA fill/blend + DMA2D copy/flush, native 800x480, %s (%s)\n",
+            c->direct ? "DIRECT canvas" : "partial tiles", c->extra_accel ? "extra" : "fast");
     return display;
 fail:
     for(unsigned i = 0; i < 2; i++) if(c->buffer[i] && c->buffer[i] != MAP_FAILED)

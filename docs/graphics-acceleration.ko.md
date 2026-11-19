@@ -143,6 +143,24 @@ sh tests/check-scroll-reuse.sh /root/interaction-bench /root/new-scroll-proof
 
 ## 정확도 검사
 
+### 추가 CPU·메모리 최적화
+
+이전 렌더러 비교 기준은 커밋 `20cf441d`입니다. 네이티브 해상도와 33ms refresh 설정을 유지합니다. 기본 `korvo-ui`/`lvgl-music-demo`는 `korvo_ppa_lvgl_fast.c`를 사용합니다. CPU가 늘어나는 설정을 기본 적용하지 않도록, 아래 캐시·묶음 처리는 별도 `korvo-ui-extra`/`lvgl-music-demo-extra`에 포함했습니다. 두 실행 파일은 함께 설치되며 하나씩 실행해야 합니다.
+
+- **명령 묶기:** draw unit 안에서 함께 처리할 수 있는 최대 16개 fill/A8 blend 요청을 순서대로 전달합니다. 한 개만 남으면 기존 RUN ioctl을 사용합니다. SW task가 끼거나 task가 하나씩 생성되면 단일 요청으로 처리하므로 항상 명령이 합쳐지는 것은 아닙니다. 커널은 실제 요청 수만 복사하며 완료한 개수를 돌려줍니다. SW 렌더링·scratch 재사용·framebuffer 전송 전에 대기 명령을 완료하여 그리기 순서를 보존합니다.
+- **반복 그리기 캐시:** 글자/폰트 심벌의 배치와 A8 bitmap, 곡선 마스크를 기존 32KiB scratch 안에서 재사용합니다. 글자는 LVGL의 RGB565 합성 함수를 그대로 사용하여 부분 갱신 경계의 반올림 차이를 피합니다. 선택·장식·이미지 폰트·겹친 glyph 등 지원하지 않는 경우는 기존 글자 렌더러로 돌아갑니다. 이미지 업로드나 용량 초과 시 scratch 캐시를 비웁니다.
+- **그림자 모서리 캐시:** `0004-linux-shadow-corner-cache.patch`는 서로 다른 크기/반지름의 모서리 3개를 예약 canvas의 남는 공간에 보관합니다. LVGL이 계산한 원래 mask를 그대로 복사하므로 모양이나 blur 값을 바꾸지 않습니다. 다른 포트는 기존 단일 shadow cache를 유지합니다.
+- **작은 변경의 재렌더링:** 내용이 바뀐 영역과 그 영역이 이동한 잔상 범위를 다시 그립니다. 영역이 너무 크거나 복잡하면 전체 렌더링합니다. 입력마다 수행하던 배경/clip 검사도 한 refresh에 한 번 수행합니다.
+- **메모리:** 캐시 데이터·메타데이터는 기존 예약 메모리를 사용하며 별도 framebuffer를 늘리지 않습니다. 카메라의 115,200바이트 버퍼는 camera 화면에서만 할당합니다. 함수/데이터 section 제거로 사용하지 않는 코드를 최종 실행 파일에서 제외하고, 음악 플레이어는 고정 5ms polling 대신 LVGL이 요청한 다음 처리 시각을 사용합니다.
+
+데모 음악은 빌드 호스트의 `generate-demo-wav.py`로 만들어 `/usr/share/sounds/korvo-lvgl-demo.wav`에 설치합니다. 보드에서 첫 재생 때 수행하던 software sine 합성과 `/tmp`의 약 1.18MiB 파일을 제거하며 target Python은 필요하지 않습니다. 일반 드래그의 추가 CPU 감소는 반복 측정에서 일관되게 확인되지 않았습니다. [원시 수치·최종 기본값 선택·검증 조건](../tests/results/cpu-2026-11-19.md)을 확인하세요.
+
+확장 실행 파일에서 `KORVO_CACHE_DISABLE=1`은 추가 캐시를 끄고 `KORVO_BATCH_DISABLE=1`은 명령 묶기를 끕니다. `KORVO_UI_STATS=1` 종료 출력의 `korvo-cache`, `korvo-shadow`로 hit/miss와 명령 수를 확인할 수 있습니다. `batch_calls`는 queue를 비운 횟수이며 단일 RUN도 포함합니다. `dirty_reused`는 작은 내용 변경 중에도 픽셀을 재사용한 횟수이며 기본 모드에서도 적용합니다.
+
+작업이 없는 draw unit이 0(작업 중)을 반환하던 문제도 기본·확장 모드에서 수정했습니다. 이제 `LV_DRAW_UNIT_IDLE`을 반환하여 offscreen canvas/vector 초기화가 무한 대기로 들어가지 않습니다.
+
+드라이버의 `SOURCE_CLEAN` flag는 전용 scratch의 A8 source를 처음에 전체 동기화한 뒤, **CPU가 해당 mask를 수정하지 않은 경우에만** 사용할 수 있습니다. 포트는 완료된 전송 후에만 clean 상태를 기록하고 scratch 재사용 시 초기화합니다. 이는 다른 프로세스나 임의의 사용자 버퍼에 대한 cache 일관성 보장이 아닙니다.
+
 ```sh
 /etc/init.d/S97lvgl-music-demo stop
 ppa-test
@@ -151,7 +169,7 @@ ppa-test
 
 `ppa-test`는 stride/crop 복사, 좁은 사각형의 캐시 동기화, 홀수/짝수 X 좌표의 framebuffer 재사용, RGB565 5색 채우기, 고정 alpha·ARGB8888·A8 합성, 범위 초과 요청 거부를 검사합니다. CPU로 만든 기준값과 픽셀을 비교하며 대상 사각형 밖의 보존도 확인합니다. 기본 검사는 LCD 내용을 바꾸지 않습니다. GUI 실행 중에는 전용 workspace 소유권 때문에 `EBUSY`가 정상이며 `--stats`는 동시 실행 가능합니다.
 
-`tests/ppa-lvgl-scene.c`는 실제 LVGL draw dispatch와 flush까지 검사하는 고정 장면입니다. 대상 toolchain으로 `korvo_ppa_lvgl.c`와 함께 빌드하고 LVGL/ThorVG 라이브러리를 링크합니다. GUI를 멈춘 뒤 소프트웨어와 하드웨어로 각각 실행해 캡처합니다.
+`tests/ppa-lvgl-scene.c`는 실제 LVGL draw dispatch와 flush, offscreen ARGB canvas 완료, 그림자 cache hit까지 검사합니다. 기본 모드는 `korvo_ppa_lvgl_fast.c`, 확장 모드는 `korvo_ppa_lvgl.c`와 빌드하고 LVGL/ThorVG를 링크합니다. GUI를 멈춘 뒤 소프트웨어와 하드웨어로 각각 캡처합니다.
 
 ```sh
 KORVO_PPA_DISABLE=1 ./ppa-lvgl-scene /root/ppa-sw.rgb565
