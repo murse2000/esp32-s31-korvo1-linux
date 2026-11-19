@@ -1,0 +1,31 @@
+From: Korvo-1 Linux port
+Subject: [PATCH] evdev: preserve queued pointer press/release reports
+
+On a slow software renderer, both press and release can be queued before
+the next input read. Draining all events returns only RELEASED and loses
+the click. Deliver one complete SYN_REPORT at a time and let LVGL drain
+the remaining reports via continue_reading.
+
+diff --git a/src/drivers/evdev/lv_evdev.c b/src/drivers/evdev/lv_evdev.c
+--- a/src/drivers/evdev/lv_evdev.c
++++ b/src/drivers/evdev/lv_evdev.c
+@@ -134,7 +134,7 @@ static void _evdev_read(lv_indev_t * indev, lv_indev_data_t * data)
+             else if(in.code == ABS_Y || in.code == ABS_MT_POSITION_Y) dsc->root_y = in.value;
+             else if(in.code == ABS_MT_TRACKING_ID) {
+                 if(in.value == -1) dsc->state = LV_INDEV_STATE_RELEASED;
+-                else if(in.value == 0) dsc->state = LV_INDEV_STATE_PRESSED;
++                else if(in.value >= 0) dsc->state = LV_INDEV_STATE_PRESSED;
+             }
+         }
+         else if(in.type == EV_KEY) {
+@@ -153,6 +153,10 @@ static void _evdev_read(lv_indev_t * indev, lv_indev_data_t * data)
+                 }
+             }
+         }
++        else if(in.type == EV_SYN && in.code == SYN_REPORT && lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER) {
++            data->continue_reading = true;
++            break;
++        }
+     }
+ 
+     /*Process and store in data*/

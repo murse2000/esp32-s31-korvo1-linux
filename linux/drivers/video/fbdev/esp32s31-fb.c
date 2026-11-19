@@ -8,6 +8,7 @@
 #include <linux/fb.h>
 #include <linux/gpio/consumer.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/math64.h>
 #include <linux/module.h>
 #include <linux/of_address.h>
@@ -90,7 +91,11 @@ static void s31fb_start(struct fb_info *info)
     writel(~0U, p->tx + 12);
     writel(p->desc_phys, p->tx + TX_LINK2);
     writel(BIT(1), p->tx + TX_LINK1);
-    udelay(2);
+    /* Wait for actual DMA data before enabling the RGB consumer. */
+    {
+        u32 fifo;
+        readl_poll_timeout_atomic(p->tx + 0x18, fifo, !(fifo & BIT(1)), 1, 1000);
+    }
     writel(readl(p->lcd + LCD_USER) | LCD_UPDATE, p->lcd + LCD_USER);
     writel(readl(p->lcd + LCD_USER) | LCD_START, p->lcd + LCD_USER);
     gpiod_set_value_cansleep(p->enable, 1);
@@ -145,7 +150,7 @@ static int s31fb_set_par(struct fb_info *info)
           ((v->sync & FB_SYNC_VERT_HIGH_ACT) ? 0 : BIT(10)) |
           ((v->sync & FB_SYNC_HOR_HIGH_ACT) ? 0 : BIT(23)), p->lcd + 0x28);
     writel(0, p->lcd + 0x34); writel(0, p->lcd + 0x38);
-    writel(0, p->lcd + 0x3c); /* no transfer buffering */
+    writel(1, p->lcd + 0x3c); /* RGB transfer buffer, as in ESP-IDF */
     v->pixclock = div_u64(1000000000000ULL, actual);
     if (!p->blanked) s31fb_start(info);
     mutex_unlock(&p->lock);
@@ -155,6 +160,13 @@ static int s31fb_blank(int blank, struct fb_info *info)
 {
     struct s31fb *p = info->par;
     mutex_lock(&p->lock);
+    /* fbdev clients request UNBLANK on every open. Restarting a running
+     * RGB/DMA pipeline here interrupts scanout during demo exec switches.
+     */
+    if (p->blanked == (blank != FB_BLANK_UNBLANK)) {
+        mutex_unlock(&p->lock);
+        return 0;
+    }
     p->blanked = blank != FB_BLANK_UNBLANK;
     if (p->blanked) {
         /* This panel has a fixed backlight. Transmit one black frame

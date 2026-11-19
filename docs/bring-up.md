@@ -33,7 +33,19 @@ On-board checks read the expected DMA tile colors for red, green, blue, white an
 
 The user visually confirmed that the entire physical panel turned red after the live RGB blank-phase correction. The same correction was then incorporated into the persistent kernel image.
 
-The final flashed kernel is build `#3` (2026-11-19 09:21 KST). Without any live register correction, VSYNC repeatedly reasserted after acknowledgment and DMA descriptor addresses advanced. A bounded LVGL camera screen displayed 22 frames while native LCD scanout was active. Wi-Fi reconnected automatically and the board was returned to the demo menu.
+The color-override correction was flashed as kernel build `#3` (2026-11-19 09:21 KST). Without any live register correction, VSYNC repeatedly reasserted after acknowledgment and DMA descriptor addresses advanced. A bounded LVGL camera screen displayed 22 frames while native LCD scanout was active. Wi-Fi reconnected automatically and the board was returned to the demo menu.
+
+### LVGL switching and response correction
+
+The user subsequently reported a black panel on demo selection while the GUI process and framebuffer image remained valid. The fbdev backend requests UNBLANK for each newly executed demo, and the native driver unnecessarily restarted an already active pipeline. UNBLANK is now idempotent; the RGB transfer buffer is enabled and DMA FIFO readiness is checked before starting output. The user confirmed that menus and demos appeared after kernel build `#4` (2026-11-19 09:45 KST). A lower-resolution rendering option was declined, so output and logical UI resolution remain 800×480.
+
+Native rendering was tuned with a 32KiB partial draw buffer (previously 96KiB), style/shadow/header caches, and 10ms input polling. With identical instrumentation excluding empty refresh requests, a 20-frame music-demo startup sample changed from 2,880ms work / 1,029ms flush / 4,822ms wall time to 2,359ms work / 781ms flush / 4,244ms wall time. The 18% reduction in measured work is specific to that sample, not a universal FPS claim.
+
+The LVGL 9.2.2 evdev backend drained multiple queued pointer reports and could collapse a short press/release into RELEASED. A package patch preserves SYN_REPORT boundaries through `continue_reading` and accepts nonnegative multitouch tracking IDs. The on-board regression pauses the GUI, queues a complete short touch, resumes it, and checks widgets entry plus HOME return. Demo/player exec transitions also close inherited descriptors; checks observed a stable 8 descriptors per GUI process.
+
+Audio HOME invokes the launcher with a bare `argv[0]`. Reusing that string as an `execl` filename made the next selection fail with ENOENT and exit. The launcher now resolves `/proc/self/exe` before switching demos. The regression also covers audio → HOME → camera → HOME.
+
+All twelve official variants were exercised through menu selection and HOME, including stress after the queued-input fix. The final on-board regression passed queued widgets/HOME and audio/HOME/camera/HOME; the camera also logged its first displayed frame. The installed GUI/audio binary hashes match the final Buildroot target, and the board was left at the menu with native framebuffer scanout active.
 
 ### Audio verification commands
 

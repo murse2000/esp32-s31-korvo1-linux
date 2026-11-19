@@ -137,6 +137,7 @@ static void play_cb(lv_event_t *e)
     if(access(song_path, R_OK)) { set_status("Could not prepare demo audio"); return; }
     player = fork();
     if(player == 0) {
+        console_prepare_exec();
         execlp("aplay", "aplay", "-q", "-D", "hw:0,0", "--period-size=256", "--buffer-size=1024", song_path, (char *)NULL);
         execlp("aplay", "aplay", "-q", song_path, (char *)NULL);
         _exit(127);
@@ -271,6 +272,9 @@ int main(void)
     }
     stop_audio();
     lv_deinit();
-    if(go_home) execl("/usr/bin/korvo-ui", "korvo-ui", "menu", (char *)NULL);
+    if(go_home) {
+        console_prepare_exec();
+        execl("/usr/bin/korvo-ui", "korvo-ui", "menu", (char *)NULL);
+    }
     return 0;
 }

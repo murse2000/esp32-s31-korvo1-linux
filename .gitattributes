@@ -1,6 +1,7 @@
 * text=auto
 *.sh text eol=lf
-*.patch text eol=lf
+# Unified diff context needs a leading space even on an empty source line.
+*.patch text eol=lf whitespace=-blank-at-eol
 *.mk text eol=lf
 Makefile text eol=lf
 Config.in text eol=lf

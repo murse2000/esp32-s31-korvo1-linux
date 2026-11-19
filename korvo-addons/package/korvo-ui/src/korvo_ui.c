@@ -21,6 +21,7 @@
 static volatile sig_atomic_t running = 1;
 static const char *next_demo;
 static const char *self;
+static char self_path[4096];
 static unsigned render_scene;
 static int camera_fd = -1;
 static unsigned char camera_pixels[240 * 240 * 2];
@@ -38,6 +39,32 @@ static uint32_t tick(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint32_t)((uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+static uint32_t frame_start, render_start, flush_start, frame_ms, render_ms, flush_ms;
+static uint32_t sample_start;
+static int frame_flushed;
+static unsigned frame_count;
+static void measure_frame(lv_event_t *event)
+{
+    uint32_t now = tick();
+    switch(lv_event_get_code(event)) {
+        case LV_EVENT_REFR_START: frame_start = now; frame_flushed = 0; break;
+        case LV_EVENT_RENDER_START: render_start = now; break;
+        case LV_EVENT_RENDER_READY: render_ms += now - render_start; break;
+        case LV_EVENT_FLUSH_START: flush_start = now; frame_flushed = 1; break;
+        case LV_EVENT_FLUSH_FINISH: flush_ms += now - flush_start; break;
+        case LV_EVENT_REFR_READY:
+            if(!frame_flushed) break;
+            if(!frame_count) sample_start = frame_start;
+            frame_ms += now - frame_start;
+            if(++frame_count == 20) {
+                fprintf(stderr, "korvo-ui: 20 frames wall=%u work=%u render=%u flush=%u ms\n",
+                        now - sample_start, frame_ms, render_ms, flush_ms);
+                frame_count = frame_ms = render_ms = flush_ms = 0;
+            }
+            break;
+        default: break;
+    }
 }
 static void quit(int sig) { (void)sig; running = 0; }
 static void select_demo(lv_event_t *event)
@@ -69,6 +96,7 @@ static void inputs(void)
         close(fd);
         lv_indev_type_t type = strstr(name, "Goodix") || strstr(name, "Touch") ? LV_INDEV_TYPE_POINTER : LV_INDEV_TYPE_KEYPAD;
         lv_indev_t *indev = lv_evdev_create(type, path);
+        if(indev) lv_timer_set_period(lv_indev_get_read_timer(indev), 10);
         if(indev && type == LV_INDEV_TYPE_POINTER)
             lv_evdev_set_calibration(indev, 0, 0, 799, 479);
     }
@@ -163,7 +191,15 @@ static void menu(void)
 }
 int main(int argc, char **argv)
 {
-    self = argv[0];
+    /* The audio HOME action uses argv[0]="korvo-ui". execl does not
+     * search PATH, so resolve the actual executable before re-exec.
+     */
+    ssize_t self_len = readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+    if(self_len > 0) {
+        self_path[self_len] = '\0';
+        self = self_path;
+    }
+    else self = "/usr/bin/korvo-ui";
     const char *demo = argc > 1 ? argv[1] : "menu";
     if(!strcmp(demo, "--list")) {
         puts("menu");
@@ -171,6 +207,7 @@ int main(int argc, char **argv)
         return 0;
     }
     if(!strcmp(demo, "audio")) {
+        console_prepare_exec();
         execl("/usr/bin/lvgl-music-demo", "lvgl-music-demo", (char *)NULL);
         perror("lvgl-music-demo");
         return 1;
@@ -182,6 +219,8 @@ int main(int argc, char **argv)
     lv_display_t *display = lv_linux_fbdev_create();
     if(!display) return 1;
     lv_linux_fbdev_set_file(display, "/dev/fb0");
+    if(getenv("KORVO_UI_STATS"))
+        lv_display_add_event_cb(display, measure_frame, LV_EVENT_ALL, NULL);
     inputs();
     if(!strcmp(demo, "menu")) menu();
     else {
@@ -200,7 +239,7 @@ int main(int argc, char **argv)
     const unsigned seconds = argc > 2 ? (unsigned)atoi(argv[2]) : 0;
     while(running && (!seconds || tick() - start < seconds * 1000U)) {
         uint32_t delay = lv_timer_handler();
-        if(delay > 50) delay = 50;
+        if(delay > 10) delay = 10;
         if(delay < 2) delay = 2;
         struct timespec pause = {0, delay * 1000000L};
         nanosleep(&pause, NULL);
@@ -209,6 +248,7 @@ int main(int argc, char **argv)
     if(camera_frames) printf("korvo-ui: displayed %u camera frames\n", camera_frames);
     lv_deinit();
     if(next_demo) {
+        console_prepare_exec();
         execl(self, self, next_demo, (char *)NULL);
         perror("exec demo");
         return 1;
