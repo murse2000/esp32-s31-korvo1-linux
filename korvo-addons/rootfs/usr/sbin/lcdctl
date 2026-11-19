@@ -7,6 +7,12 @@ case ${1:-status} in
     printf 'Driver: '; cat "$base/name"
     printf 'Resolution: '; cat "$base/virtual_size"
     printf 'Blanked: '; cat "$base/blank"
+    if [ -r "$base/device/scanout" ]; then
+      printf 'DMA source: '; cat "$base/device/scanout"
+    fi
+    if [ -r "$base/device/refresh_active" ]; then
+      printf 'Refreshing: '; cat "$base/device/refresh_active"
+    fi
     fbset
     ;;
   on) echo 0 > "$base/blank";;

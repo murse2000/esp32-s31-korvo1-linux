@@ -42,7 +42,11 @@ lcdctl color blue
 lcdctl color off
 ```
 
-`off`는 검은 프레임을 전송한 뒤 RGB scanout을 정지하고, `on`은 descriptor ring을 다시 구성해 화면을 복원합니다. `restart`는 이 과정을 수행하며 framebuffer 내용은 유지합니다. `color`는 controller의 출력 색상 강제 기능이며 `off`로 정상 framebuffer 표시로 돌아옵니다. PCLK 기본값은 기존 부트로더와 같은 약 18MHz입니다. `fbset`으로 고정 해상도의 porch와 sync 길이도 설정할 수 있지만 패널에 맞지 않는 값은 정상 영상을 보장하지 않습니다.
+`off`는 검은 프레임을 전송한 뒤 RGB scanout을 정지하고, `on`은 descriptor ring을 다시 구성해 화면을 복원합니다. `restart`는 이 과정을 수행하며 framebuffer 내용은 유지합니다. `color`는 LCD DMA가 framebuffer 대신 예약 메모리의 단색 RGB565 타일을 반복해서 읽도록 전환합니다. LVGL이 계속 그려도 단색 화면을 유지하며, `lcdctl color off`로 현재 GUI 표시로 돌아옵니다. 타일은 framebuffer 예약 영역의 사용하지 않던 4KiB를 사용하므로 별도 RAM 할당이나 화면 내용 덮어쓰기가 없습니다. `lcdctl status`의 `DMA source`는 SRAM descriptor와 타일을 실제로 읽어 `solid 0xf800`(빨강) 또는 `framebuffer`를 표시합니다.
+
+이전 구현에서는 RGB blank 구간 활성화 비트(`LCD_BK_EN`)가 빠져, 자동 다음 프레임이 설정되어도 LCD가 한 프레임 뒤 멈췄습니다. 따라서 debug-data 레지스터에 색상을 써도 화면이 갱신되지 않았습니다. blank 구간을 활성화해 반복 VSYNC와 DMA 진행을 확인했으며, 색상 테스트도 정상 DMA 경로로 변경했습니다. `lcdctl status`의 `Refreshing: 1`은 LCD 엔진의 실제 START 비트가 켜져 있음을 뜻합니다. 설정값 읽기와 실제 화면 갱신은 서로 다른 검증입니다.
+
+PCLK 기본값은 기존 부트로더와 같은 약 18MHz입니다. `fbset`으로 고정 해상도의 porch와 sync 길이도 설정할 수 있지만 패널에 맞지 않는 값은 정상 영상을 보장하지 않습니다.
 
 이 서브보드는 별도 백라이트 밝기 제어 핀이 없고, 공식 BSP의 brightness 함수도 `ESP_ERR_NOT_SUPPORTED`를 반환합니다. `lcdctl off`는 백라이트 전원을 차단하는 기능이 아닙니다. 물리적인 밝기 조절에는 별도의 하드웨어 연결이 필요합니다.
 

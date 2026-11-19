@@ -19,6 +19,8 @@
 #define LCD_START BIT(27)
 #define LCD_RESET BIT(28)
 #define FB_BYTES (800 * 480 * 2)
+#define SOLID_OFFSET ALIGN(FB_BYTES, 4096)
+#define SOLID_BYTES 4096
 #define CHUNK 4032U
 #define NODES DIV_ROUND_UP(FB_BYTES, CHUNK)
 #define TX_CONF0 0x10
@@ -28,8 +30,8 @@
 #define TX_PERIPH 0x44
 
 struct s31fb {
-    void __iomem *lcd, *tx, *clkrst, *descs;
-    phys_addr_t desc_phys;
+    void __iomem *lcd, *tx, *clkrst, *descs, *solid;
+    phys_addr_t desc_phys, solid_phys;
     struct gpio_desc *enable;
     u32 palette[16];
     bool blanked;
@@ -52,7 +54,8 @@ static void s31fb_ring(struct fb_info *info)
         u32 ctl = size | (size << 12) | BIT(31);
         if (i == NODES - 1) ctl |= BIT(30);
         writel(ctl, p->descs + i * 16);
-        writel(info->fix.smem_start + offset, p->descs + i * 16 + 4);
+        writel(p->force_color < 0 ? info->fix.smem_start + offset : p->solid_phys,
+               p->descs + i * 16 + 4);
         writel(p->desc_phys + ((i + 1) % NODES) * 16, p->descs + i * 16 + 8);
         writel(0, p->descs + i * 16 + 12);
         offset += size;
@@ -62,7 +65,19 @@ static void s31fb_ring(struct fb_info *info)
 static void s31fb_start(struct fb_info *info)
 {
     struct s31fb *p = info->par;
-    writel(p->force_color < 0 ? 0 : ((u32)p->force_color << 1) | BIT(0), p->lcd + 0x40);
+    /* Feed the selected RGB565 pixels through the normal DMA path, without
+     * depending on the LCD debug-data replacement register.
+     * All descriptors can reuse this tile because CHUNK is pixel-aligned.
+     * The tile occupies unused space in the reserved framebuffer region,
+     * so test colors do not consume RAM or overwrite a running GUI.
+     */
+    if (p->force_color >= 0) {
+        unsigned int i;
+        for (i = 0; i < SOLID_BYTES; i += 2)
+            writew(p->force_color, p->solid + i);
+        wmb();
+    }
+    writel(0, p->lcd + 0x40);
     s31fb_ring(info);
     writel(readl(p->lcd + LCD_USER) | LCD_RESET, p->lcd + LCD_USER);
     writel(readl(p->lcd + LCD_MISC) | BIT(27), p->lcd + LCD_MISC);
@@ -118,7 +133,10 @@ static int s31fb_set_par(struct fb_info *info)
     writel(BIT(31) | BIT(8) | BIT(6) | 1, p->lcd); /* PCLK on negative edge */
     writel(0, p->lcd + 0x10); /* RGB565, converter bypass */
     writel(BIT(13) | (1 << 19) | BIT(24), p->lcd + LCD_USER);
-    writel(BIT(3) | BIT(4) | BIT(25), p->lcd + LCD_MISC);
+    /* RGB auto-next-frame requires the front/back blank phases. Without
+     * BK_EN the engine stops after one frame despite NEXT_FRAME_EN.
+     */
+    writel(BIT(3) | BIT(4) | BIT(25) | BIT(26), p->lcd + LCD_MISC);
     writel((480 - 1) | ((v->vsync_len + v->upper_margin + 480 + v->lower_margin - 1) << 16), p->lcd + 0x1c);
     writel((800 - 1) | ((v->hsync_len + v->left_margin + 800 + v->right_margin - 1) << 16), p->lcd + 0x20);
     writel((v->hsync_len + v->left_margin - 1) |
@@ -142,10 +160,18 @@ static int s31fb_blank(int blank, struct fb_info *info)
         /* This panel has a fixed backlight. Transmit one black frame
          * before stopping scanout so the visible image is actually blank.
          */
-        writel(BIT(0), p->lcd + 0x40);
-        msleep(50);
+        struct fb_var_screeninfo *v = &info->var;
+        u64 frame_ps = (u64)(v->xres + v->left_margin + v->right_margin + v->hsync_len) *
+                       (v->yres + v->upper_margin + v->lower_margin + v->vsync_len) * v->pixclock;
+        unsigned int frame_ms = DIV_ROUND_UP_ULL(frame_ps, 1000000000ULL);
+        int previous_color = p->force_color;
+        s31fb_stop(info);
+        p->force_color = 0;
+        s31fb_start(info);
+        msleep(2 * frame_ms + 5);
         gpiod_set_value_cansleep(p->enable, 0);
         s31fb_stop(info);
+        p->force_color = previous_color;
     } else s31fb_start(info);
     mutex_unlock(&p->lock);
     return 0;
@@ -178,13 +204,41 @@ static ssize_t force_color_store(struct device *dev, struct device_attribute *at
     if (ret) return ret;
     if (color < -1 || color > 65535) return -EINVAL;
     mutex_lock(&p->lock);
+    if (!p->blanked) s31fb_stop(info);
     p->force_color = color;
-    if (!p->blanked) writel(color < 0 ? 0 : ((u32)color << 1) | BIT(0), p->lcd + 0x40);
+    if (!p->blanked) s31fb_start(info);
     mutex_unlock(&p->lock);
     return count;
 }
 static DEVICE_ATTR_RW(force_color);
-static struct attribute *s31fb_attrs[] = { &dev_attr_force_color.attr, NULL };
+static ssize_t scanout_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct fb_info *info = dev_get_drvdata(dev);
+    struct s31fb *p = info->par;
+    ssize_t ret;
+    mutex_lock(&p->lock);
+    /* Read back SRAM and the DMA tile, rather than just the requested color. */
+    if (readl(p->descs + 4) == p->solid_phys)
+        ret = sysfs_emit(buf, "solid 0x%04x\n", readw(p->solid));
+    else if (readl(p->descs + 4) == info->fix.smem_start)
+        ret = sysfs_emit(buf, "framebuffer\n");
+    else
+        ret = sysfs_emit(buf, "unknown\n");
+    mutex_unlock(&p->lock);
+    return ret;
+}
+static DEVICE_ATTR_RO(scanout);
+static ssize_t refresh_active_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct fb_info *info = dev_get_drvdata(dev);
+    struct s31fb *p = info->par;
+    return sysfs_emit(buf, "%u\n", !!(readl(p->lcd + LCD_USER) & LCD_START));
+}
+static DEVICE_ATTR_RO(refresh_active);
+static struct attribute *s31fb_attrs[] = {
+    &dev_attr_force_color.attr, &dev_attr_scanout.attr,
+    &dev_attr_refresh_active.attr, NULL
+};
 ATTRIBUTE_GROUPS(s31fb);
 static int s31fb_probe(struct platform_device *pdev)
 {
@@ -213,13 +267,16 @@ static int s31fb_probe(struct platform_device *pdev)
     ret = mem ? of_address_to_resource(mem, 0, &desc) : -EINVAL;
     of_node_put(mem);
     if (ret) goto release;
-    if (resource_size(&frame) < FB_BYTES || resource_size(&desc) < NODES * 16) { ret = -EINVAL; goto release; }
+    if (resource_size(&frame) < SOLID_OFFSET + SOLID_BYTES ||
+        resource_size(&desc) < NODES * 16) { ret = -EINVAL; goto release; }
     p->desc_phys = desc.start;
     p->descs = devm_ioremap(dev, desc.start, resource_size(&desc));
+    p->solid_phys = frame.start + SOLID_OFFSET;
+    p->solid = devm_ioremap_wc(dev, p->solid_phys, SOLID_BYTES);
     p->enable = devm_gpiod_get(dev, "enable", GPIOD_OUT_HIGH);
     if (IS_ERR(p->enable)) { ret = PTR_ERR(p->enable); goto release; }
     info->screen_base = devm_ioremap_wc(dev, frame.start, FB_BYTES);
-    if (!p->descs || !info->screen_base) { ret = -ENOMEM; goto release; }
+    if (!p->descs || !p->solid || !info->screen_base) { ret = -ENOMEM; goto release; }
     info->screen_size = FB_BYTES;
     info->fix = (struct fb_fix_screeninfo){.id = "esp32s31-rgb", .smem_start = frame.start,
         .smem_len = FB_BYTES, .type = FB_TYPE_PACKED_PIXELS, .visual = FB_VISUAL_TRUECOLOR,

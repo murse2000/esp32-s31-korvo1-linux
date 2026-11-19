@@ -25,6 +25,16 @@ Board: ESP32-S31-Korvo-1, 16 MiB NOR flash and 8 GB microSD. On 2026-11-19, the 
 
 Commands, the complete demo catalog, and implementation paths are documented in [the Korean peripheral guide](korvo-peripherals.ko.md).
 
+### LCD color override correction
+
+The user reported that `lcdctl color red` did not change the physical panel. Reading back the requested sysfs value had only verified command delivery. A live hardware probe then found LCD_START clear, stationary DMA descriptors, and no recurring VSYNC. RGB blank phases (`LCD_BK_EN`, LCD_MISC bit 26) were missing: auto-next-frame alone did not sustain scanout. Enabling the blank phases immediately produced recurring VSYNC and advancing DMA descriptors. The corrected driver enables these phases and redirects the normal AXI DMA descriptor ring to a repeated RGB565 tile in the unused 4KiB at `0x50FFC000` within reserved framebuffer memory. `color off` restores framebuffer addresses without overwriting GUI pixels. Blank also sends a black DMA tile for two frame periods before stopping scanout. The read-only `scanout` attribute reads descriptor/tile memory, and `refresh_active` reads the LCD engine START bit.
+
+On-board checks read the expected DMA tile colors for red, green, blue, white and black; `color off` restored framebuffer descriptors. With the GUI briefly paused to exclude its own drawing, SHA-256 of `/dev/fb0` was identical before and after the color sequence. Blank selected a black tile and cleared LCD_START; unblank plus 16/18MHz clock changes preserved the selected red tile and continuous refresh. These checks verify the DMA source and framebuffer preservation; physical panel appearance requires a visual check separately.
+
+The user visually confirmed that the entire physical panel turned red after the live RGB blank-phase correction. The same correction was then incorporated into the persistent kernel image.
+
+The final flashed kernel is build `#3` (2026-11-19 09:21 KST). Without any live register correction, VSYNC repeatedly reasserted after acknowledgment and DMA descriptor addresses advanced. A bounded LVGL camera screen displayed 22 frames while native LCD scanout was active. Wi-Fi reconnected automatically and the board was returned to the demo menu.
+
 ### Audio verification commands
 
 Run on the board's Linux shell:
