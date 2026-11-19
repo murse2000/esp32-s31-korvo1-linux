@@ -254,6 +254,10 @@ kill "$(cat /run/wpa_supplicant.wlan0.pid)"
 
 이 목록은 모든 주변 장치가 완전히 동작한다는 보증이 아닙니다. 검증한 구성요소와 아직 확인하지 않은 기능을 구분해 기록합니다.
 
+### 성능과 지연 진단
+
+"ping을 실행하면 CPU 사용률이 흔들리고 UART 콘솔이 느리다"는 증상을 COM3 UART에서 저부하로 측정해 정리했습니다. USB host IRQ(초당 약 3,500회)와 LVGL idle 루프는 원인이 아니었고, 9 MiB RAM에서 page cache가 부족해 생기는 SD 재읽기와 kswapd 스캔이 원인이었습니다. MMC readahead를 128 KiB에서 8 KiB로 낮추는 `S06readahead` init 스크립트를 추가했습니다. 측정값과 기각한 가설, 되돌린 변경은 [docs/performance-diagnostics.ko.md](docs/performance-diagnostics.ko.md)에 있습니다.
+
 #### ES8389 사운드 재생과 녹음
 
 이 드라이버는 공식 [Korvo-1 BSP 핀맵](https://github.com/espressif/esp-bsp/blob/master/bsp/esp32_s31_korvo_1/API.md) 및 [ESP-IDF S31 GDMA 연결표](https://github.com/espressif/esp-idf/blob/master/components/esp_hal_dma/esp32s31/gdma_periph.c)를 참고해 Linux 7.3.4용으로 추가했습니다. I²S는 GPIO3(BCLK), GPIO4(WS), GPIO5(DOUT), GPIO6(DIN)를 사용하며 보드에서 ES8389로 가는 별도 MCLK 연결은 없습니다. ES8389는 I²C 7-bit 주소 `0x10`이고, 스피커 출력은 코덱 뒤 NS4150B 앰프와 연결됩니다. [보드 사용자 안내서](https://documentation.espressif.com/esp-dev-kits/en/latest/esp32s31/esp32-s31-korvo-1/index.html)는 ES8389와 NS4150B를 이 보드의 오디오 부품으로 명시합니다.
@@ -464,6 +468,10 @@ Troubleshooting:
 See [docs/bring-up.md](docs/bring-up.md) for the detailed record and [the peripheral guide](docs/korvo-peripherals.ko.md) for commands. The board boots Hart-0 ESP-Hosted radio firmware and Hart-1 OpenSBI/Linux 7.3.4. Wi-Fi reconnects after reboot from a profile on microSD. The native `esp32s31-rgb` framebuffer driver controls LCD timings and DMA; the Goodix touchscreen and USB HID keyboard are supported. The camera fitted to the tested board is SC101IOT (I²C `0x68`, ID `0xDA4A`); the V4L2 driver captures a central 240×240 YUYV window, with RGB conversion for PPM photos and preview. The driver also supports OV3660 detection and setup, but that sensor path was not exercised on this board. All eleven official LVGL 9.2.2 demos are included (twelve entries with both vector rendering variants), together with the Korvo audio and camera screens. ES8389 PCM playback reaches I²S/AHB-GDMA TX; audible speaker output and microphone capture still need physical confirmation.
 
 These are observations from the tested configuration, not a guarantee that every peripheral or feature is fully supported.
+
+#### Performance and latency
+
+The "CPU swings while ping runs, UART console feels slow" report was measured over COM3 UART with no SSH session. About 3,500 USB host IRQs per second and the LVGL idle loop were ruled out. The cause is repeated SD refetching and kswapd scanning driven by a starved page cache on 9 MiB of RAM. `S06readahead` lowers the MMC readahead from 128 KiB to 8 KiB. Numbers, rejected hypotheses and a reverted change are in [docs/performance-diagnostics.ko.md](docs/performance-diagnostics.ko.md) (Korean).
 
 #### ES8389 audio
 

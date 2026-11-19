@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# This board has 9 MiB of usable RAM. The 128 KiB MMC readahead does not fit
+# in what is left of the page cache: kswapd evicts the pages right after the
+# read, and the same sectors are fetched again. 8 KiB keeps readahead useful
+# with far fewer refetches.
+case ${1:-start} in
+  start)
+    for dev in /sys/block/mmcblk*/queue/read_ahead_kb; do
+      [ -w "$dev" ] && echo 8 > "$dev"
+    done
+    ;;
+esac
+exit 0
