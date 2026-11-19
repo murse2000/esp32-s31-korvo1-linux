@@ -3,6 +3,7 @@
 #include <lvgl.h>
 #include <demos/lv_demos.h>
 #include <src/drivers/display/fb/lv_linux_fbdev.h>
+#include "korvo_ppa_lvgl.h"
 #include <src/drivers/evdev/lv_evdev.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -216,9 +217,8 @@ int main(int argc, char **argv)
     console_graphics();
     lv_init();
     lv_tick_set_cb(tick);
-    lv_display_t *display = lv_linux_fbdev_create();
+    lv_display_t *display = korvo_ppa_display_create();
     if(!display) return 1;
-    lv_linux_fbdev_set_file(display, "/dev/fb0");
     if(getenv("KORVO_UI_STATS"))
         lv_display_add_event_cb(display, measure_frame, LV_EVENT_ALL, NULL);
     inputs();

@@ -69,7 +69,7 @@ korvo-camera --preview 10
 /etc/init.d/S97lvgl-music-demo start
 ```
 
-DMA frame buffer는 작은 coherent page 여러 개로 구성해 128KiB 연속 메모리 할당을 피합니다. Descriptor는 HP SRAM의 `0x2F079C00`부터 1KiB 예약 영역을 사용합니다. LCD는 `0x2F079000`부터 앞 3KiB를 사용하며, AXI TX0와 RX1 채널을 각각 전용으로 사용합니다. 다른 AXI DMA 사용자를 추가할 때 이 채널과 SRAM 영역을 중복 사용하면 안 됩니다.
+DMA frame buffer는 작은 coherent page 여러 개로 구성해 128KiB 연속 메모리 할당을 피합니다. Descriptor는 HP SRAM의 `0x2F079C00`부터 512바이트 예약 영역 중 464바이트를 사용합니다. LCD는 `0x2F079000`부터 앞 3KiB를 사용하며, AXI TX0와 RX1 채널을 각각 전용으로 사용합니다. 뒤 512바이트는 별도 PPA/2D-DMA descriptor로 예약했습니다. 다른 DMA 사용자를 추가할 때 이 채널과 SRAM 영역을 중복 사용하면 안 됩니다.
 
 처음 시작하거나 스트림을 멈출 때 불완전한 프레임은 폐기합니다. 완전한 프레임만 저장·표시하며, 캡처 오류는 `dmesg`에 기록합니다. 센서 ID 검출 실패 시 가짜 `/dev/video0`를 만들지 않습니다. SC101IOT는 이 구성에서 JPEG를 직접 출력하지 않으므로, 정지 사진은 YUYV를 RGB로 변환해 저장합니다.
 
@@ -115,6 +115,8 @@ korvo-ui widgets
 공식 LVGL 9.2.2에 들어 있는 데모 11종을 모두 포함하며, 벡터 데모는 2가지 실행 방식으로 나뉩니다. 공식 `music`은 음악 플레이어 모양의 UI 데모입니다. 실제 소리 재생용 Korvo UI는 `audio`입니다. 마이크 녹음과 스피커의 실제 음량·음질 확인은 별도 검증 대상입니다.
 
 ### 메뉴 전환과 네이티브 해상도 성능
+
+최신 이미지는 **PPA/2D-DMA 가속, 전체 화면 DIRECT canvas, FPS/CPU 모니터**를 포함합니다. [그래픽 가속 안내](graphics-acceleration.ko.md)에 지원 범위, 공식 ESP-IDF BSP와의 비교, 메모리 예약, 성능 비교 명령과 픽셀 검사를 정리했습니다. 아래 32KiB 버퍼 수치는 가속 전 소프트웨어 튜닝 단계의 기록이며, 현재 기본 경로는 별도로 예약한 전체 화면 canvas를 사용합니다.
 
 LVGL fbdev 포트는 새 데모를 실행할 때마다 UNBLANK를 요청합니다. 이미 켜진 RGB/DMA 엔진을 이 요청마다 다시 초기화하던 문제를 수정했습니다. 상태가 같으면 초기화하지 않으며, RGB transfer buffer를 켜고 실제 DMA FIFO 데이터가 준비된 뒤 출력을 시작합니다. 사용자가 메뉴와 데모 화면의 실제 표시를 확인했습니다.
 

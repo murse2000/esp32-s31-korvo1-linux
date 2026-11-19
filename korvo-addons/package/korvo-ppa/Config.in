@@ -1,0 +1,3 @@
+config BR2_PACKAGE_KORVO_PPA
+	bool "Korvo-1 PPA and 2D-DMA acceleration"
+	depends on BR2_LINUX_KERNEL

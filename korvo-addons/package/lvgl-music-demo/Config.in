@@ -2,5 +2,6 @@ config BR2_PACKAGE_LVGL_MUSIC_DEMO
 	bool "LVGL Korvo-1 music player demo"
 	depends on BR2_PACKAGE_LVGL && BR2_PACKAGE_ALSA_UTILS
 	select BR2_PACKAGE_ALSA_LIB
+	select BR2_PACKAGE_KORVO_PPA
 	help
 		Touch-enabled LVGL music player with ALSA playback for ESP32-S31-Korvo-1.

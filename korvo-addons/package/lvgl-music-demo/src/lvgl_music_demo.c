@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <lvgl.h>
 #include <src/drivers/display/fb/lv_linux_fbdev.h>
+#include "korvo_ppa_lvgl.h"
 #include <src/drivers/evdev/lv_evdev.h>
 #include <dirent.h>
 #include <errno.h>
@@ -198,9 +199,8 @@ int main(void)
     signal(SIGINT, quit);
     lv_init();
     lv_tick_set_cb(tick);
-    lv_display_t *disp = lv_linux_fbdev_create();
+    lv_display_t *disp = korvo_ppa_display_create();
     if(!disp) { fprintf(stderr, "cannot create LVGL framebuffer display\n"); return 1; }
-    lv_linux_fbdev_set_file(disp, "/dev/fb0");
     char *touch = find_touch();
     if(touch) {
         lv_indev_t *indev = lv_evdev_create(LV_INDEV_TYPE_POINTER, touch);

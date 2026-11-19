@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+case ${1:-start} in
+  start)
+    { modprobe esp32s31_ppa ||
+      insmod /lib/modules/"$(uname -r)"/updates/esp32s31_ppa.ko; } > /var/log/ppa.log 2>&1 || {
+      echo 'PPA unavailable; LVGL will use software rendering. See /var/log/ppa.log'
+      exit 1
+    }
+    ;;
+esac
+exit 0

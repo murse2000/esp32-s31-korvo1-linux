@@ -47,6 +47,18 @@ Audio HOME invokes the launcher with a bare `argv[0]`. Reusing that string as an
 
 All twelve official variants were exercised through menu selection and HOME, including stress after the queued-input fix. The final on-board regression passed queued widgets/HOME and audio/HOME/camera/HOME; the camera also logged its first displayed frame. The installed GUI/audio binary hashes match the final Buildroot target, and the board was left at the menu with native framebuffer scanout active.
 
+### PPA / DMA2D and direct rendering (2026-11-19)
+
+Kernel `#6` boots with a cached 768KiB canvas reservation and separate camera/PPA SRAM descriptor windows. The new `esp32s31_ppa` misc driver programs PPA Fill/Blend and 2D-DMA rectangle copy/flush without resetting LCD AXI-GDMA, camera AXI RX1, or audio AHB-GDMA. The LVGL launcher and audio player share the new port and automatically show the enabled performance monitor.
+
+Hardware tests passed cropped/strided copy with preserved surrounding pixels, red/green/blue/white/black fills, RGB565 fixed alpha, ARGB8888 pixel alpha, and invalid bounds rejection. A deterministic LVGL scene compared all 384,000 pixels with the software reference. Opaque/rounded/gradient/text/clipped-image output matched exactly; 6,464 alpha pixels differed within one RGB565 step per channel. The test disables the console cursor and performance overlay to avoid unrelated changes in the capture.
+
+With the same monitor-enabled binary, the first 20 music-demo updates measured software 3,930ms work/892ms flush, accelerated partial 2,529ms/163ms, and accelerated DIRECT 1,454ms/166ms. DIRECT executed 78 fills, 78 flushes and 81 blends with zero hardware errors over that run. These are scene-specific measurements, not a promised FPS for all effects. The public [graphics guide](graphics-acceleration.ko.md) records reproduction commands and unsupported operations.
+
+After deployment, the queued-touch integration passed widgets/HOME and audio/HOME/camera/HOME. The camera saved one valid 240×240 photo while native LCD scanout remained active; ES8389 remained registered and Wi-Fi reconnected after the kernel flash. The benchmark started with the performance monitor enabled. Physical panel appearance and perceived smoothness still require the user's direct observation.
+
+Raw clock registers decoded to PCLK 17,999,004Hz, Htotal 928, Vtotal 548, negative pixel edge. This matches the official BSP's 18MHz timing and implies approximately 35.39Hz scanout. No LCD overclock was applied.
+
 ### Audio verification commands
 
 Run on the board's Linux shell:
