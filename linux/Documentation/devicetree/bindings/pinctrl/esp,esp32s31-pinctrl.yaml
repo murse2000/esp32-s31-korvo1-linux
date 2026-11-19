@@ -104,6 +104,10 @@ patternProperties:
 
           input-disable: true
 
+          output-enable: true
+
+          output-disable: true
+
           drive-open-drain: true
 
           drive-push-pull: true

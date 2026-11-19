@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+case ${1:-start} in
+  start)
+    [ -e /dev/fb0 ] || exit 0
+    pidof korvo-ui >/dev/null && exit 0
+    /usr/bin/korvo-ui menu >/var/log/korvo-ui.log 2>&1 &
+    ;;
+  stop)
+    killall korvo-ui lvgl-music-demo 2>/dev/null || true
+    ;;
+  restart) "$0" stop; sleep 1; "$0" start;;
+esac
+exit 0

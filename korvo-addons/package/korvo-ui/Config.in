@@ -1,0 +1,4 @@
+config BR2_PACKAGE_KORVO_UI
+	bool "Korvo-1 official LVGL demo launcher"
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_LVGL

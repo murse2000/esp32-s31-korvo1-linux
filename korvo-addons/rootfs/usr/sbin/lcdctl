@@ -1,0 +1,31 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+set -eu
+base=/sys/class/graphics/fb0
+case ${1:-status} in
+  status)
+    printf 'Driver: '; cat "$base/name"
+    printf 'Resolution: '; cat "$base/virtual_size"
+    printf 'Blanked: '; cat "$base/blank"
+    fbset
+    ;;
+  on) echo 0 > "$base/blank";;
+  off) echo 4 > "$base/blank";;
+  restart) echo 4 > "$base/blank"; sleep 1; echo 0 > "$base/blank";;
+  clock)
+    case ${2:-} in
+      16) fbset -pixclock 62500;;
+      18) fbset -pixclock 55556;;
+      *) echo 'Supported pixel clocks: lcdctl clock 16 | lcdctl clock 18' >&2; exit 1;;
+    esac
+    ;;
+  color)
+    case ${2:-off} in
+      red) value=63488;; green) value=2016;; blue) value=31;;
+      white) value=65535;; black) value=0;; off) value=-1;;
+      *) echo 'Colors: red green blue white black off' >&2; exit 1;;
+    esac
+    echo "$value" > "$base/device/force_color"
+    ;;
+  *) echo 'Usage: lcdctl {status|on|off|restart|clock 16|clock 18|color NAME}' >&2; exit 1;;
+esac

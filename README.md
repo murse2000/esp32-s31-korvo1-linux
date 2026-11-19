@@ -2,6 +2,8 @@
 
 [한국어](#한국어) · [English](#english)
 
+> 최신 Wi-Fi 자동접속, native LCD 제어, SC101IOT/OV3660 카메라, 전체 LVGL 공식 데모 사용법은 [Korvo-1 주변 장치 안내](docs/korvo-peripherals.ko.md)를 확인하세요.
+
 ---
 
 ## 한국어
@@ -22,6 +24,7 @@
 | `buildroot/` | Buildroot 소스 스냅샷 및 원본 라이선스 |
 | `esp-buildroot-external/` | Korvo-1 NOR defconfig, 디바이스 트리, Linux 설정 조각, rootfs overlay, ESP-Hosted 관련 Buildroot 패키지 |
 | `linux/` | S31 AHB-GDMA와 I²S/ASoC CPU-DAI를 포함한 Linux 소스 오버레이 |
+| `korvo-addons/` | Wi-Fi 재연결 서비스, V4L2 카메라 모듈, LVGL 전체 데모와 터치 메뉴, LCD 도구 |
 | `korvo1-nor-reference.patch` | 고정된 `annoyedmilk/esp32-s31-linux` 레퍼런스 트리에 Korvo-1 설정과 NOR 파티션 구성을 적용하는 패치 |
 | `buildroot-host-util-linux-fix.patch` | 레퍼런스 Buildroot의 host util-linux 빌드 문제를 우회하는 패치 |
 | `build-korvo-wsl.sh` | WSL Ubuntu에서 필요한 도구를 준비하고 전체 빌드 및 이미지 조립을 수행하는 스크립트 |
@@ -108,7 +111,7 @@ sha256sum -c SHA256SUMS
 | `linux` | `0x1F0000` | `0xCB0000` | Hart 1 kernel 영역 및 manifest. 현재 root filesystem은 microSD에서 부팅 |
 | `data` | `0xEA0000` | `0x160000` | UBI/UBIFS 쓰기 가능 데이터 영역 |
 
-현재 Linux root filesystem은 microSD 이미지(`korvo1-sdcard.img.xz`)에서 부팅합니다. 16MiB NOR의 Linux 영역은 `0x1F0000`부터 `0xEA0000`까지이며, `flash-korvo1.ps1`은 커널과 크기 manifest만 기록하고 UBI 데이터 영역은 덮어쓰지 않습니다. `tmux`는 약 8.93MiB로 측정되어 microSD rootfs 구성에서도 제외했습니다.
+현재 Linux root filesystem은 microSD 이미지(`korvo1-sdcard.img.xz`)에서 부팅합니다. 16MiB NOR의 Linux 영역은 `0x1F0000`부터 `0xEA0000`까지이며, `flash-korvo1.ps1`은 파티션표·커널·크기 manifest를 기록하고 UBI 데이터 영역은 덮어쓰지 않습니다. `tmux`는 약 8.93MiB로 측정되어 microSD rootfs 구성에서도 제외했습니다.
 
 ### 보드 플래시
 
@@ -121,7 +124,7 @@ sha256sum -c SHA256SUMS
 .\flash-korvo1.ps1 -Port COM3
 ```
 
-기본 포트는 `COM3`, 속도는 921600 baud입니다. 스크립트는 Linux kernel을 `0x1F0000`, kernel-size manifest를 `0x6AF000`에 기록하며 microSD나 UBI 데이터 영역은 건드리지 않습니다. 포트가 다르면 `COM7` 등 실제 번호로 바꿉니다. 스크립트는 Windows Python launcher를 통해 Python 3.12의 `esptool` 모듈을 실행하므로 해당 환경에 esptool이 설치되어 있어야 합니다. `korvo1-flash.bin`은 전체 16MiB 복구 이미지이며 NOR 데이터를 모두 덮어씁니다.
+기본 포트는 `COM3`, 속도는 921600 baud입니다. 스크립트는 파티션표를 `0x8000`, Linux kernel을 `0x1F0000`, kernel-size manifest를 `0xE9F000`에 기록하며 microSD나 UBI 데이터 영역은 건드리지 않습니다. 포트가 다르면 `COM7` 등 실제 번호로 바꿉니다. 스크립트는 Windows Python launcher를 통해 Python 3.12의 `esptool` 모듈을 실행하므로 해당 환경에 esptool이 설치되어 있어야 합니다. `korvo1-flash.bin`은 전체 16MiB 복구 이미지이며 NOR 데이터를 모두 덮어씁니다.
 
 Ubuntu 안에서 직접 기록하려면 빌드 스크립트가 생성한 Python 환경에서 `esptool`을 사용하고 `FLASH_PORT`를 설정할 수 있습니다.
 
@@ -239,8 +242,9 @@ kill "$(cat /run/wpa_supplicant.wlan0.pid)"
 - COM3 UART, 921600 baud로 이미지를 기록하고 부팅 확인
 - Hart 0 ESP-Hosted radio firmware NG-1.0.6.0.24, Hart 1 OpenSBI 및 Linux 7.3.4 부팅
 - microSD의 ext4 root filesystem 부팅 및 FAT boot partition을 `/mnt/sd`에 마운트
-- Linux에서 `wlan0` 및 Bluetooth `hci0` 등록. Wi-Fi AP 연결과 성능은 이 기록에서 검증하지 않았으며, 사용자가 SSID와 암호를 제공해 직접 연결해야 합니다.
+- Linux에서 `wlan0` 및 Bluetooth `hci0` 등록. microSD에 저장한 Wi-Fi 프로필로 재부팅과 전체 전원 분리 후 자동접속·DHCP 주소 할당을 확인했습니다. 공개 이미지에는 개인 프로필이 없으므로 `wifi-add 'SSID'`로 처음 한 번 등록해야 합니다.
 - 800×480 framebuffer, Goodix GT1151 터치, USB HID 키보드 감지
+- LCD는 native `esp32s31-rgb` 드라이버에서 타이밍·DMA·blank/unblank를 관리하며 `lcdctl`로 제어합니다. 실제 장착된 카메라는 SC101IOT(`0x68`, ID `0xDA4A`)로 확인했고 V4L2 사진 저장과 미리보기를 구현했습니다. 공식 LVGL 9.2.2 데모 11종(벡터 2가지 방식 포함 12개 실행 항목)은 터치 메뉴로 선택할 수 있습니다. 자세한 사용법과 검증 범위는 [주변 장치 안내](docs/korvo-peripherals.ko.md)에 있습니다.
 - 인터넷에서 확인한 Espressif Korvo-1 보드 핀맵과 ESP-IDF S31 AHB-PDMA IRQ 표를 기준으로 AHB-GDMA, ESP32-S31 I²S CPU-DAI, ES8389 코덱 및 simple-audio-card 연결을 구현했습니다. 커널 로그에서 ES8389 probe와 `Korvo-1 ES8389` 카드 등록을 확인했고, ALSA가 playback/capture PCM 장치를 만들었습니다.
 - `aplay -l`에서 카드 0 `Korvo-1 ES8389`를 확인했습니다. 44.1 kHz WAV를 `aplay -D hw:0,0 ...`로 재생할 때 I²S playback 시작/종료 및 AHB-GDMA cyclic TX 전송 로그가 확인됐고, codec clock coefficient 오류는 수정했습니다. 이는 Linux→DMA→I²S PCM 경로의 검증입니다. 실제 스피커에서 들리는 음량·음질은 귀로 확인하지 않았으므로 아날로그 출력까지 검증 완료라고 단정하지 않습니다.
 - 현재 Buildroot microSD rootfs에는 `aplay`와 `mpg123`이 포함됩니다. MP3 디코더 버전은 확인했지만 보드에서 MP3 파일 재생 자체는 아직 시험하지 않았습니다.
@@ -367,7 +371,7 @@ sha256sum -c SHA256SUMS
 | `linux` | `0x1F0000` | `0xCB0000` | Hart-1 kernel region and size manifest; root filesystem boots from microSD |
 | `data` | `0xEA0000` | `0x160000` | Writable UBI/UBIFS data area |
 
-The Linux root filesystem boots from `korvo1-sdcard.img.xz`. The NOR Linux partition spans `0x1F0000` through `0xEA0000`; `flash-korvo1.ps1` writes only the kernel at `0x1F0000` and its size manifest at `0x6AF000`, leaving the UBI data region untouched. `korvo1-flash.bin` is a full 16 MiB recovery image and overwrites all NOR contents. `tmux` was measured at about 8.93 MiB and omitted from the root filesystem.
+The Linux root filesystem boots from `korvo1-sdcard.img.xz`. The NOR Linux partition spans `0x1F0000` through `0xEA0000`; `flash-korvo1.ps1` writes the partition table at `0x8000`, the kernel at `0x1F0000` and its size manifest at `0xE9F000`, leaving the UBI data region untouched. `korvo1-flash.bin` is a full 16 MiB recovery image and overwrites all NOR contents. `tmux` was measured at about 8.93 MiB and omitted from the root filesystem.
 
 ### Flash the board
 
@@ -380,7 +384,7 @@ The Linux root filesystem boots from `korvo1-sdcard.img.xz`. The NOR Linux parti
 .\flash-korvo1.ps1 -Port COM3
 ```
 
-The script defaults to `COM3` and uses 921600 baud. It writes the kernel and its manifest only, leaving the microSD card and writable NOR data partition untouched. Substitute the actual port if it differs. The Windows Python launcher must provide Python 3.12 with `esptool` installed. `korvo1-flash.bin` remains available for a full-image recovery, which overwrites all 16 MiB including writable data.
+The script defaults to `COM3` and uses 921600 baud. It writes the partition table, kernel and its manifest together, leaving the microSD card and writable NOR data partition untouched. Substitute the actual port if it differs. The Windows Python launcher must provide Python 3.12 with `esptool` installed. `korvo1-flash.bin` remains available for a full-image recovery, which overwrites all 16 MiB including writable data.
 
 The build script can also invoke esptool in its ESP-IDF Python environment when `FLASH_PORT` is set, for example `FLASH_PORT=/dev/ttyUSB0 ./build-korvo-wsl.sh`. USB device forwarding into WSL is environment-dependent; using the Windows PowerShell script is often simpler.
 
@@ -454,7 +458,7 @@ Troubleshooting:
 
 ### Hardware validation and limitations
 
-See [docs/bring-up.md](docs/bring-up.md) for the detailed record. The tested board booted the Hart-0 ESP-Hosted radio firmware NG-1.0.6.0.24 and Hart-1 OpenSBI/Linux 7.3.4, and detected the 800×480 framebuffer, Goodix GT1151 touch, USB HID keyboard, `wlan0`, and the `Korvo-1 ES8389` ALSA card. A WAV PCM playback run reached I²S/AHB-GDMA TX. Audible speaker output and microphone capture still need physical confirmation. Camera support has not been brought up.
+See [docs/bring-up.md](docs/bring-up.md) for the detailed record and [the peripheral guide](docs/korvo-peripherals.ko.md) for commands. The board boots Hart-0 ESP-Hosted radio firmware and Hart-1 OpenSBI/Linux 7.3.4. Wi-Fi reconnects after reboot from a profile on microSD. The native `esp32s31-rgb` framebuffer driver controls LCD timings and DMA; the Goodix touchscreen and USB HID keyboard are supported. The camera fitted to the tested board is SC101IOT (I²C `0x68`, ID `0xDA4A`); the V4L2 driver captures a central 240×240 YUYV window, with RGB conversion for PPM photos and preview. The driver also supports OV3660 detection and setup, but that sensor path was not exercised on this board. All eleven official LVGL 9.2.2 demos are included (twelve entries with both vector rendering variants), together with the Korvo audio and camera screens. ES8389 PCM playback reaches I²S/AHB-GDMA TX; audible speaker output and microphone capture still need physical confirmation.
 
 These are observations from the tested configuration, not a guarantee that every peripheral or feature is fully supported.
 

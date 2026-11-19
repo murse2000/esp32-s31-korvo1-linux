@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+case ${1:-start} in
+  start)
+    modprobe korvo_camera > /var/log/camera.log 2>&1 || {
+      echo 'Camera probe failed; see /var/log/camera.log and dmesg'
+      exit 1
+    }
+    ;;
+esac
+exit 0

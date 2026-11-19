@@ -59,11 +59,35 @@ cd "$reference"
 # Buildroot does not notice changes to the external Linux overlay once the
 # kernel source has been extracted. Sync the release overlay before building,
 # and force a fresh Linux extract only when that source set changes.
-for d in Documentation arch drivers include; do
+for d in Documentation arch drivers include sound patches; do
     mkdir -p "$reference/linux/$d"
     cp -a "$project_source/linux/$d/." "$reference/linux/$d/"
 done
-overlay_hash="$(find "$project_source/linux" -type f ! -name '._*' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+# Board additions are kept separately from the pinned reference snapshot.
+cp -a "$project_source/bsp/linux-sdroot-korvo1.fragment" "$reference/br2-external/board/esp32s31/"
+cp -a "$project_source/korvo-addons/package/." "$reference/br2-external/package/"
+cp -a "$project_source/korvo-addons/rootfs/." "$reference/br2-external/board/esp32s31/rootfs-overlay-korvo1/"
+find "$reference/br2-external/board/esp32s31/rootfs-overlay-korvo1/etc/init.d" \
+     "$reference/br2-external/board/esp32s31/rootfs-overlay-korvo1/usr/sbin" -type f -exec chmod 755 {} +
+for package in lvgl lvgl-music-demo korvo-ui korvo-camera; do
+    grep -q "package/$package/Config.in" "$reference/br2-external/Config.in" || \
+        printf 'source "$BR2_EXTERNAL_ESP32S31_PATH/package/%s/Config.in"\n' "$package" >> "$reference/br2-external/Config.in"
+done
+for option in LVGL LVGL_MUSIC_DEMO KORVO_UI KORVO_CAMERA; do
+    grep -q "^BR2_PACKAGE_${option}=y" "$reference/br2-external/board/esp32s31/defconfig/korvo1.fragment" || \
+        printf 'BR2_PACKAGE_%s=y\n' "$option" >> "$reference/br2-external/board/esp32s31/defconfig/korvo1.fragment"
+done
+scripts/mkdefconfigs.sh
+addons_hash="$(find "$project_source/korvo-addons/package" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+addons_stamp="$reference/build/.korvo1-public-addons"
+if [[ -f "$reference/build/br-output-korvo1/.config" ]] && \
+   [[ "$(cat "$addons_stamp" 2>/dev/null || true)" != "$addons_hash" ]]; then
+    make -C "$reference/external/buildroot" O="$reference/build/br-output-korvo1" \
+        HOSTCC=/usr/bin/gcc-14 HOSTCXX=/usr/bin/g++-14 \
+        lvgl-dirclean korvo-ui-dirclean lvgl-music-demo-dirclean korvo-camera-dirclean
+fi
+printf '%s\n' "$addons_hash" > "$addons_stamp"
+overlay_hash="$({ find "$project_source/linux" -type f ! -name '._*' -print0; printf '%s\0' "$project_source/bsp/linux-sdroot-korvo1.fragment"; } | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
 overlay_stamp="$reference/build/.korvo1-public-linux-overlay"
 if [[ -f "$reference/build/br-output-korvo1/.config" ]] && \
    [[ "$(cat "$overlay_stamp" 2>/dev/null || true)" != "$overlay_hash" ]]; then

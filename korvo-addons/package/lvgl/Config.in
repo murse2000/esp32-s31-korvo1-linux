@@ -1,0 +1,4 @@
+config BR2_PACKAGE_LVGL
+	bool "lvgl"
+	help
+		Lightweight embedded graphics library with Linux framebuffer and evdev drivers.

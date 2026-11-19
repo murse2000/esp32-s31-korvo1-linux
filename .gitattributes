@@ -1,0 +1,18 @@
+* text=auto
+*.sh text eol=lf
+*.patch text eol=lf
+*.mk text eol=lf
+Makefile text eol=lf
+Config.in text eol=lf
+*.fragment text eol=lf
+*.dts text eol=lf
+*.dtsi text eol=lf
+*.bin binary
+*-Image binary
+*.xz binary
+*.png binary
+*.pdf binary
+build-output/*.csv text eol=lf
+build-output/SHA256SUMS text eol=lf
+korvo-addons/rootfs/etc/init.d/* text eol=lf
+korvo-addons/rootfs/usr/sbin/* text eol=lf

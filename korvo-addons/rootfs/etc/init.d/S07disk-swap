@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Keep heavy LVGL demos from exhausting the S31's small PSRAM pool.
+case ${1:-start} in
+  start)
+    grep -q '^/dev/root / ext4\|^/dev/mmcblk0p2 / ext4' /proc/mounts || exit 0
+    swap=/var/lib/korvo-ui.swap
+    grep -q "$swap" /proc/swaps && exit 0
+    if [ ! -e "$swap" ]; then
+      umask 077
+      dd if=/dev/zero of="$swap" bs=262144 count=128 2>/dev/null || { rm -f "$swap"; exit 1; }
+      mkswap "$swap" >/dev/null || { rm -f "$swap"; exit 1; }
+    fi
+    swapon -p 5 "$swap"
+    ;;
+esac
+exit 0

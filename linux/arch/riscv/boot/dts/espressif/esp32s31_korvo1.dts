@@ -18,6 +18,14 @@
 			reg = <0x50f40000 0xc0000>;
 			no-map;
 		};
+		lcd_descriptors: lcd-descriptors@2f079000 {
+			reg = <0x2f079000 0x0c00>;
+			no-map;
+		};
+		camera_descriptors: camera-descriptors@2f079c00 {
+			reg = <0x2f079c00 0x0400>;
+			no-map;
+		};
 	};
 
 	chosen {
@@ -25,6 +33,7 @@
 
 		/* The panel of the loader; blank with USB Serial/JTAG on. */
 		framebuffer {
+			status = "disabled";
 			compatible = "simple-framebuffer";
 			width = <800>;
 			height = <480>;
@@ -61,7 +70,7 @@
 
 /* The LCD (loader), the card and LED (drivers), the flash, GPIO41, UART0. */
 &pinctrl {
-	gpio-reserved-ranges = <8 31>, <40 2>, <43 3>, <58 2>;
+	gpio-reserved-ranges = <8 30>, <40 2>, <43 3>, <58 2>;
 	/* The nets of the Korvo-1 user guide; the flash pins of the module. */
 	gpio-line-names =
 		/*  0 */ "I2C_SDA", "I2C_SCL", "I2S_MCLK", "I2S_SCLK",
@@ -229,6 +238,66 @@
 
 		simple-audio-card,codec {
 			sound-dai = <&es8389>;
+		};
+	};
+
+	camera {
+		compatible = "espressif,korvo1-ov3660";
+		/* Camera-only registers and AXI GDMA RX1; LCD TX0 is untouched. */
+		reg = <0x20396004 0x0c>, <0x20348068 0x68>, <0x20587158 0x04>;
+		i2c-bus = <&i2c0>;
+		memory-region = <&camera_descriptors>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&korvo_camera_pins>;
+	};
+
+	display@20396000 {
+		compatible = "espressif,esp32s31-korvo1-rgb";
+		reg = <0x20396000 0x44>, <0x20348138 0x68>, <0x20587000 0x160>;
+		memory-region = <&fb_region>, <&lcd_descriptors>;
+		enable-gpios = <&pinctrl 38 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&korvo_lcd_pins>;
+	};
+};
+
+&pinctrl {
+	korvo_lcd_pins: korvo-lcd-pins {
+		lcd-rgb-pins {
+			pinmux = <ESP32S31_MATRIX_OUT(8, 154)>, <ESP32S31_MATRIX_OUT(9, 155)>,
+				 <ESP32S31_MATRIX_OUT(10, 156)>, <ESP32S31_MATRIX_OUT(11, 157)>,
+				 <ESP32S31_MATRIX_OUT(12, 158)>, <ESP32S31_MATRIX_OUT(13, 159)>,
+				 <ESP32S31_MATRIX_OUT(14, 160)>, <ESP32S31_MATRIX_OUT(15, 161)>,
+				 <ESP32S31_MATRIX_OUT(16, 162)>, <ESP32S31_MATRIX_OUT(17, 163)>,
+				 <ESP32S31_MATRIX_OUT(18, 164)>, <ESP32S31_MATRIX_OUT(19, 165)>,
+				 <ESP32S31_MATRIX_OUT(33, 166)>, <ESP32S31_MATRIX_OUT(34, 167)>,
+				 <ESP32S31_MATRIX_OUT(35, 168)>, <ESP32S31_MATRIX_OUT(36, 169)>,
+				 <ESP32S31_MATRIX_OUT(40, 149)>, <ESP32S31_MATRIX_OUT(43, 151)>,
+				 <ESP32S31_MATRIX_OUT(44, 152)>, <ESP32S31_MATRIX_OUT(45, 153)>;
+			drive-strength = <20>;
+			bias-disable;
+		};
+	};
+	korvo_camera_pins: korvo-camera-pins {
+		camera-data-pins {
+			pinmux = <ESP32S31_MATRIX_IN(46, 162)>,
+				 <ESP32S31_MATRIX_IN(47, 163)>,
+				 <ESP32S31_MATRIX_IN(48, 164)>,
+				 <ESP32S31_MATRIX_IN(49, 165)>,
+				 <ESP32S31_MATRIX_IN(50, 166)>,
+				 <ESP32S31_MATRIX_IN(51, 167)>,
+				 <ESP32S31_MATRIX_IN(52, 168)>,
+				 <ESP32S31_MATRIX_IN(53, 169)>,
+				 <ESP32S31_MATRIX_IN(54, 158)>,
+				 <ESP32S31_MATRIX_IN(56, 161)>,
+				 <ESP32S31_MATRIX_IN(57, 159)>;
+			bias-disable;
+			input-enable;
+		};
+		camera-clock-pin {
+			pinmux = <ESP32S31_MATRIX_OUT(55, 150)>;
+			output-enable;
+			drive-strength = <20>;
 		};
 	};
 };

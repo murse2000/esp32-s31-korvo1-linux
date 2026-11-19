@@ -1,0 +1,3 @@
+config BR2_PACKAGE_KORVO_CAMERA
+	bool "Korvo-1 SC101IOT/OV3660 V4L2 camera"
+	depends on BR2_LINUX_KERNEL

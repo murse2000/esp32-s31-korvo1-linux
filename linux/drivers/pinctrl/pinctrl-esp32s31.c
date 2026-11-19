@@ -204,7 +204,7 @@ static int esp32s31_mux_one(struct esp32s31_pinctrl *pctrl, unsigned int pin,
 	if (mux & ESP32S31_MUX_OUT)
 		writel(sig, pctrl->gpio + ESP32S31_GPIO_FUNC_OUT_SEL(pin));
 
-	esp32s31_iomux_rmw(pctrl, pin, ESP32S31_IOMUX_MCU_SEL, set);
+	esp32s31_iomux_rmw(pctrl, pin, ESP32S31_IOMUX_MCU_SEL | BIT(1), set);
 	esp32s31_cnnt_select(pctrl, pin, func);
 	return 0;
 }
@@ -273,6 +273,10 @@ static int esp32s31_pin_config_get(struct pinctrl_dev *pctldev,
 	case PIN_CONFIG_INPUT_ENABLE:
 		on = iomux & ESP32S31_IOMUX_FUN_IE;
 		break;
+	case PIN_CONFIG_OUTPUT_ENABLE:
+		on = readl(pctrl->gpio + esp32s31_bank(pin, ESP32S31_GPIO_ENABLE,
+						 ESP32S31_GPIO_ENABLE1)) & BIT(pin % 32);
+		break;
 	case PIN_CONFIG_DRIVE_OPEN_DRAIN:
 		on = pad & ESP32S31_PIN_PAD_DRIVER;
 		break;
@@ -331,6 +335,14 @@ static int esp32s31_config_one(struct esp32s31_pinctrl *pctrl, unsigned int pin,
 		if (drv < 0)
 			return drv;
 		esp32s31_iomux_rmw(pctrl, pin, ESP32S31_IOMUX_FUN_DRV, drv);
+		break;
+	case PIN_CONFIG_OUTPUT_ENABLE:
+		/* A clock output needs software OE while keeping its matrix signal. */
+		esp32s31_rmw(pctrl, pctrl->gpio + ESP32S31_GPIO_FUNC_OUT_SEL(pin),
+			      BIT(10), arg ? BIT(10) : 0);
+		writel(BIT(pin % 32), pctrl->gpio +
+		       esp32s31_bank(pin, arg ? ESP32S31_GPIO_ENABLE_W1TS : ESP32S31_GPIO_ENABLE_W1TC,
+				     arg ? ESP32S31_GPIO_ENABLE1_W1TS : ESP32S31_GPIO_ENABLE1_W1TC));
 		break;
 	case PIN_CONFIG_DRIVE_OPEN_DRAIN:
 		esp32s31_pin_rmw(pctrl, pin, 0, ESP32S31_PIN_PAD_DRIVER);

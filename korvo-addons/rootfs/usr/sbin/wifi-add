@@ -1,0 +1,36 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Add a WPA/WPA2 profile without placing a passphrase in shell history/argv.
+set -eu
+umask 077
+CONF=/etc/wpa_supplicant.conf
+ssid=${1:-}
+if [ -z "$ssid" ]; then printf 'SSID: '; IFS= read -r ssid; fi
+[ -n "$ssid" ] || { echo 'SSID is empty' >&2; exit 1; }
+priority=${2:-10}
+case $priority in ''|*[!0-9]*) echo 'Priority must be an integer' >&2; exit 1;; esac
+temp=$(mktemp /etc/.wifi-profile.XXXXXX)
+cleanup() { stty echo 2>/dev/null || true; rm -f "$temp" "$temp.new"; }
+trap cleanup EXIT HUP INT TERM
+printf 'Wi-Fi password (hidden): '
+stty -echo
+IFS= read -r password
+stty echo
+printf '\n'
+printf '%s\n' "$password" | wpa_passphrase "$ssid" | sed '/^[[:space:]]*#psk=/d; s/^}/\tpriority='"$priority"'\n}/' > "$temp"
+unset password
+grep -q '^[[:space:]]*psk=' "$temp" || { echo 'Invalid WPA passphrase (8–63 characters required)' >&2; exit 1; }
+[ -e "$CONF" ] || printf 'ctrl_interface=/var/run/wpa_supplicant\nupdate_config=1\n' > "$CONF"
+# Keep the current config and append a distinct profile. Reject a duplicate
+# instead of silently accumulating conflicting credentials for the same SSID.
+ssid_line=$(sed -n '/^[[:space:]]*ssid=/p' "$temp")
+if grep -Fqx "$ssid_line" "$CONF"; then
+    echo 'This SSID already exists. Edit its network block in /etc/wpa_supplicant.conf.' >&2
+    exit 1
+fi
+cat "$CONF" "$temp" > "$temp.new"
+chmod 600 "$temp.new"
+mv "$temp.new" "$CONF"
+sync
+/etc/init.d/S40wifi restart
+echo 'Profile saved on microSD. It will reconnect automatically after reboot.'

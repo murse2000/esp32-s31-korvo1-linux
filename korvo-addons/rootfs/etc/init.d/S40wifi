@@ -1,0 +1,58 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+IFACE=wlan0
+CONF=/etc/wpa_supplicant.conf
+PID=/run/korvo-wifi-watch.pid
+alive() { [ -s "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
+watch_wifi()
+{
+    # A read-only image update must never replace a saved /etc profile.
+    # Import the old removable partition profile only when /etc is empty.
+    if ! grep -Eq '^[[:space:]]*network[[:space:]]*=' "$CONF" 2>/dev/null &&
+       grep -Eq '^[[:space:]]*network[[:space:]]*=' /mnt/sd/wpa_supplicant.conf 2>/dev/null; then
+        (umask 077; cp /mnt/sd/wpa_supplicant.conf "$CONF")
+        chmod 600 "$CONF"
+        logger -t wifi 'Imported saved profile from /mnt/sd'
+    fi
+    while :; do
+        if [ -d /sys/class/net/$IFACE ] &&
+           grep -Eq '^[[:space:]]*network[[:space:]]*=' "$CONF" 2>/dev/null; then
+            if ! wpa_cli -i "$IFACE" ping 2>/dev/null | grep -q PONG; then
+                rm -f /run/wpa_supplicant.$IFACE.pid
+                ip link set "$IFACE" up
+                wpa_supplicant -B -s -D nl80211 -i "$IFACE" -c "$CONF" -P /run/wpa_supplicant.$IFACE.pid
+            fi
+            if ! alive /run/wpa_cli.$IFACE.pid; then
+                wpa_cli -B -i "$IFACE" -a /usr/sbin/wpa-dhcp-action -P /run/wpa_cli.$IFACE.pid
+            fi
+            # Repair a missed CONNECTED event or a dead DHCP client.
+            if wpa_cli -i "$IFACE" status 2>/dev/null | grep -q '^wpa_state=COMPLETED' &&
+               ! alive /run/udhcpc.$IFACE.pid; then
+                /usr/sbin/wpa-dhcp-action "$IFACE" CONNECTED
+            fi
+        fi
+        sleep 10
+    done
+}
+case ${1:-start} in
+    start)
+        alive "$PID" && exit 0
+        watch_wifi </dev/null >>/var/log/wifi-watch.log 2>&1 &
+        echo $! > "$PID"
+        echo 'Wi-Fi reconnect service started; use wifi-add to save a network.'
+        ;;
+    stop)
+        for file in "$PID" /run/wpa_watch.$IFACE.pid /run/wpa_cli.$IFACE.pid /run/wpa_supplicant.$IFACE.pid /run/udhcpc.$IFACE.pid; do
+            if alive "$file"; then kill "$(cat "$file")" 2>/dev/null || true; fi
+            rm -f "$file"
+        done
+        wpa_cli -i "$IFACE" terminate >/dev/null 2>&1 || true
+        ;;
+    restart) "$0" stop; sleep 2; "$0" start;;
+    status)
+        wpa_cli -i "$IFACE" status
+        ip -4 addr show dev "$IFACE"
+        ;;
+    *) echo "Usage: $0 {start|stop|restart|status}"; exit 1;;
+esac
+exit 0
