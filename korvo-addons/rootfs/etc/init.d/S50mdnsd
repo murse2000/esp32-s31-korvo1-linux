@@ -1,0 +1,96 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# mdnsd removes its own PID file, so the PID file alone cannot tell whether an
+# instance is already running. Two mdnsd processes were observed on the board
+# (one from boot, one 21 minutes later), each holding about 420 kB of the
+# 9 MiB of RAM. Check the process itself before starting another one.
+
+DAEMON=mdnsd
+MDNSD=/usr/sbin/$DAEMON
+PIDFILE=/var/run/$DAEMON.pid
+CFGFILE=/etc/default/$DAEMON
+
+MDNSD_ARGS=""
+
+# Read configuration variable file if it is present
+# shellcheck source=/dev/null
+[ -r "$CFGFILE" ] && . "$CFGFILE"
+
+running_pid() {
+	pidof "$DAEMON" 2>/dev/null | awk '{print $1}'
+}
+
+start() {
+	pid=$(running_pid)
+	if [ -n "$pid" ]; then
+		# Keep the PID file usable for stop() even if mdnsd removed it.
+		echo "$pid" > "$PIDFILE"
+		printf 'Starting %s: already running (pid %s)\n' "$DAEMON" "$pid"
+		logger -t mdnsd-guard "start skipped, already running as $pid" 2>/dev/null
+		return 0
+	fi
+	printf 'Starting %s: ' "$DAEMON"
+	# shellcheck disable=SC2086 # we need word splitting
+	start-stop-daemon --start --pidfile "$PIDFILE" \
+		--exec "$MDNSD" -- $MDNSD_ARGS
+	status=$?
+	if [ "$status" -eq 0 ]; then
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+	return "$status"
+}
+
+stop() {
+	pid=$(running_pid)
+	if [ -n "$pid" ] && [ ! -f "$PIDFILE" ]; then
+		echo "$pid" > "$PIDFILE"
+	fi
+	printf "Stopping %s: " "$DAEMON"
+	start-stop-daemon --stop --pidfile "$PIDFILE" \
+		--exec "$MDNSD"
+	status=$?
+	if [ "$status" -eq 0 ]; then
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+	# A second instance has no PID file entry, so it would survive the stop
+	# above. Terminate whatever still carries the name.
+	for p in $(pidof "$DAEMON" 2>/dev/null); do
+		kill "$p" 2>/dev/null || true
+	done
+	rm -f "$PIDFILE"
+	return "$status"
+}
+
+restart() {
+	stop
+	start
+}
+
+# SIGHUP reloads /etc/mdns.d/*.service
+reload() {
+	printf 'Reloading %s: ' "$DAEMON"
+	start-stop-daemon --stop --signal HUP -q --pidfile "$PIDFILE" \
+		--exec "$MDNSD"
+	status=$?
+	if [ "$status" -eq 0 ]; then
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+	return "$status"
+}
+
+case "$1" in
+	start|stop|restart|reload)
+		"$1"
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|reload}"
+		exit 1
+		;;
+esac
+exit 0

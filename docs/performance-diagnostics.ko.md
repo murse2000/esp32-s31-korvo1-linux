@@ -132,11 +132,50 @@ burst 위상에 따라 편차가 커서, readahead만으로 일정한 CPU 감소
 
 이득이 확인되지 않아 소스와 보드 바이너리를 원래대로 되돌렸습니다.
 
+## mdnsd 중복 실행
+
+상주 프로세스를 확인하던 중 `mdnsd`가 두 개 떠 있는 것을 발견했습니다. 부팅
+7.9초에 시작한 인스턴스와, 약 21분 뒤에 생긴 두 번째 인스턴스가 각각
+416~424 kB를 점유해 약 420 kB를 낭비하고 있었습니다.
+
+원인은 `mdnsd`가 **자체 PID 파일을 지우는 동작**입니다. `/etc/init.d/S50mdnsd`는
+`start-stop-daemon --pidfile`로 중복 실행을 막는데, PID 파일이 사라진 상태에서
+start가 한 번 더 호출되면 이미 실행 중인 인스턴스를 보지 못하고 새로 띄웁니다.
+실제로 조사 시점에 `/var/run/mdnsd.pid`는 없는데 프로세스는 살아 있었습니다.
+
+`S50mdnsd`를 프로세스 기준으로 판단하도록 바꿨습니다.
+
+```sh
+start() {
+	pid=$(pidof "$DAEMON")
+	if [ -n "$pid" ]; then
+		echo "$pid" > "$PIDFILE"      # keep stop() working
+		logger -t mdnsd-guard "start skipped, already running as $pid"
+		return 0
+	fi
+	...
+}
+```
+
+`stop()`은 PID 파일로 한 번 종료한 뒤, 남아 있는 동명 프로세스를 이름으로
+정리합니다.
+
+검증 결과입니다.
+
+| 시나리오 | 결과 |
+| --- | --- |
+| start를 연속 2회 호출 | "already running (pid 1468)", 프로세스 1개 유지 |
+| PID 파일 삭제 후 start 2회 | 중복 없음, PID 파일 재생성 |
+| stop → start | 프로세스 1개, PID 파일 일치 |
+| 재부팅 후 | 프로세스 1개(pid 181), PID 파일 181 |
+
 ## 남은 과제
 
 - 9 MiB라는 RAM 자체가 상한입니다. readahead 조정은 증폭을 줄이는 조치이지
   근본 해결이 아닙니다.
-- 상주 프로세스(`mdnsd`, `wpa_cli`, 콘솔 셸)와 커널 slab 2.6 MiB가 다음
-  검토 대상입니다.
-- PSRAM 예약 영역을 조정해 Linux 가용 메모리를 늘리는 방안은 Hart 0의
-  Wi-Fi/BT 펌웨어와 카메라 버퍼에 영향을 주므로 별도 검증이 필요합니다.
+- 커널은 이미 `CC_OPTIMIZE_FOR_SIZE`와 `LD_DEAD_CODE_DATA_ELIMINATION`이
+  적용되어 있어, 기능을 유지하며 회수 가능한 것은 내장 규제 DB 131 kB
+  정도입니다.
+- `ppa-canvas` 768 KiB는 PPA 가속의 렌더 타깃이고 프레임버퍼는 flush 목적지로만
+  허용되므로(`esp32s31_ppa.c`), 제거하면 LVGL이 소프트웨어 렌더로 후퇴합니다.
+- 상주 프로세스와 커널 slab 2.5 MiB가 다음 검토 대상입니다.
