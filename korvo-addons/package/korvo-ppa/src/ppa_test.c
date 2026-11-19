@@ -39,6 +39,37 @@ int main(int argc, char **argv)
         }
     }
     puts("DMA2D cropped/strided RGB565 copy and surrounding pixels: OK");
+    struct korvo_ppa_request saved = q;
+    for(unsigned i = 0; i < info.buffer_size / 2; i++) a[i] = 0x1234;
+    q.destination = (struct korvo_ppa_surface){0, 0, 512, 32};
+    q.destination_y = 3; q.width = 8;
+    if(ioctl(fd, KORVO_PPA_IOC_RUN, &q)) die("narrow DMA2D copy");
+    for(unsigned y = 0; y < 32; y++) for(unsigned x = 0; x < 512; x++) {
+        uint16_t expected = y >= 3 && y < 28 && x >= 10 && x < 18 ? b[(y - 3 + 5) * 128 + x - 10 + 6] : 0x1234;
+        if(a[y * 512 + x] != expected) { fputs("narrow copy or surrounding pixels mismatch\n", stderr); return 1; }
+    }
+    q = saved;
+    puts("Narrow rectangle cache synchronization and surrounding pixels: OK");
+    if(info.capabilities & (1U << KORVO_PPA_REUSE)) {
+        int fb = open("/dev/fb0", O_RDONLY | O_CLOEXEC);
+        if(fb < 0) die("framebuffer reference");
+        uint16_t *pixels = mmap(NULL, 800 * 480 * 2, PROT_READ, MAP_SHARED, fb, 0);
+        if(pixels == MAP_FAILED) die("framebuffer mmap");
+        for(unsigned odd = 0; odd < 2; odd++) {
+            for(unsigned i = 0; i < info.buffer_size / 2; i++) a[i] = 0x1234;
+            q = saved; q.operation = KORVO_PPA_REUSE;
+            q.source = (struct korvo_ppa_surface){KORVO_PPA_FRAMEBUFFER, 0, 800, 480};
+            q.source_x = 20 + odd; q.source_y = 230;
+            if(ioctl(fd, KORVO_PPA_IOC_RUN, &q)) die("framebuffer reuse");
+            for(unsigned y = 0; y < 64; y++) for(unsigned x = 0; x < 128; x++) {
+                uint16_t expected = y >= 7 && y < 32 && x >= 10 && x < 58 ?
+                    pixels[(y - 7 + 230) * 800 + x - 10 + 20 + odd] : 0x1234;
+                if(a[y * 128 + x] != expected) { fputs("framebuffer reuse mismatch\n", stderr); return 1; }
+            }
+        }
+        munmap(pixels, 800 * 480 * 2); close(fb); q = saved;
+        puts("Framebuffer reuse, even/odd source X and untouched surrounding pixels: OK");
+    }
     const uint16_t colors[] = {0xf800, 0x07e0, 0x001f, 0xffff, 0x0000};
     for(unsigned c = 0; c < sizeof(colors)/sizeof(colors[0]); c++) {
         for(unsigned i = 0; i < info.buffer_size / 2; i++) a[i] = 0x1234;
@@ -54,14 +85,16 @@ int main(int argc, char **argv)
     }
     puts("PPA RGB565 red/green/blue/white/black fills: OK");
     /* Red over blue: compare all channels, allowing one RGB565 quantization step. */
-    for(unsigned format = 0; format < 2; format++) {
+    for(unsigned format = 0; format < (info.capabilities & KORVO_PPA_CAP_A8 ? 3 : 2); format++) {
         for(unsigned i = 0; i < info.buffer_size / 2; i++) a[i] = 0x001f;
-        if(format) {
+        if(format == KORVO_PPA_A8) {
+            memset(b, 128, info.buffer_size);
+        } else if(format) {
             for(unsigned i = 0; i < info.buffer_size / 4; i++) ((uint32_t *)b)[i] = 0x80ff0000;
         } else {
             for(unsigned i = 0; i < info.buffer_size / 2; i++) b[i] = 0xf800;
         }
-        q.operation = KORVO_PPA_BLEND; q.format = format;
+        q.operation = KORVO_PPA_BLEND; q.format = format; q.color = 0xf800;
         q.source = (struct korvo_ppa_surface){1, 0, 128, 64};
         q.alpha = format ? 255 : 128;
         if(ioctl(fd, KORVO_PPA_IOC_RUN, &q)) die("PPA blend");
@@ -74,7 +107,7 @@ int main(int argc, char **argv)
             } else if(v != 0x001f) { fputs("blend damaged surrounding pixels\n", stderr); return 1; }
         }
     }
-    puts("PPA RGB565 constant alpha / ARGB8888 per-pixel alpha blends: OK");
+    puts("PPA RGB565 / ARGB8888 / supported A8 alpha blends: OK");
     q.operation = KORVO_PPA_FILL; q.format = 0;
     q.destination.offset = info.render_buffer_size;
     errno = 0;

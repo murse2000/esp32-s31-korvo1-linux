@@ -15,15 +15,20 @@
 | 작업 | 처리 경로 | 조건 |
 |---|---|---|
 | 단색 배경 채우기 | PPA Fill | 완전 불투명, gradient 없음, 사각형 또는 둥근 사각형의 모서리가 없는 중앙 영역 |
+| 둥근 배경·반투명 배경 | PPA A8 Blend | LVGL의 기존 반지름 마스크를 사용, gradient 없음. 모서리 안티앨리어싱 유지 |
+| 넓고 짧은 불투명 제어 | 단순 채우기 + 모서리 SW | 65,536픽셀 이하 중앙부는 빠른 무마스크 CPU 채우기, 모서리는 기존 SW. 반복 DMA 대기보다 저렴한 경로 선택 |
 | RGB565 이미지 복사 | 2D-DMA | 원본 크기, 일반 합성, 색상 재지정/마스크 없음 |
 | RGB565 고정 투명도 합성 | PPA Blend | 위와 같은 조건, 전역 opacity 적용 |
 | ARGB8888 이미지 합성 | PPA Blend | 픽셀 alpha 및 전역 opacity, premultiplied 입력 제외 |
 | 변경 영역을 LCD framebuffer로 복사 | 2D-DMA | canvas의 stride와 사각형 좌표를 사용하며 CPU의 비캐시 framebuffer 복사를 대체 |
+| 변경되지 않은 스크롤 내용 | 2D-DMA | 이전 scanout에서 canvas로 복사. 새로 드러난 띠·고정 테두리만 다시 그리기 |
 | 글자·그림자·gradient·곡선·변환 이미지·복합 마스크·다른 색 형식 | LVGL software | 화면 내용과 효과를 유지 |
 
-작은 작업은 장치 호출 비용을 고려해 512픽셀 이상부터 선택합니다. RGB565 DMA 수신은 32비트 쓰기 정렬이 필요하므로 홀수 폭/목적지 좌표의 작업은 소프트웨어가 담당합니다. 무효화 영역은 가로 2픽셀 경계로 확장합니다. 이는 해상도 축소가 아닙니다. 지원하지 않는 offscreen layer도 소프트웨어로 그립니다.
+작은 작업은 장치 호출 비용을 고려해 512픽셀 이상부터 선택합니다. RGB565 DMA 수신은 32비트 쓰기 정렬이 필요합니다. 홀수 폭/목적지 좌표의 작업도 정렬된 내부는 가속하고, 양쪽 최대 한 열씩만 소프트웨어로 그립니다. 무효화 영역은 가로 2픽셀 경계로 확장합니다. 이는 해상도 축소가 아닙니다. 지원하지 않는 offscreen layer도 소프트웨어로 그립니다.
 
-CPU와 DMA가 함께 사용하는 메모리에는 Linux DMA API로 캐시 clean/invalidate를 수행합니다. RISC-V 플랫폼 장치의 기본 coherent 설정과 `dma_skip_sync`가 실제 하드웨어와 맞지 않아, probe에서 비일관성 DMA 장치로 명시했습니다. 완료 신호만 확인하지 않고 실제 복사 픽셀과 주변 영역 보존을 검사했습니다. 짧은 DMA 완료를 기다릴 때 매번 한 scheduler tick을 기다리지 않도록 짧게 polling하고, 긴 전송만 sleep으로 전환합니다.
+CPU와 DMA가 함께 사용하는 메모리에는 Linux DMA API로 캐시 clean/invalidate를 수행합니다. RISC-V 플랫폼 장치의 기본 coherent 설정과 `dma_skip_sync`가 실제 하드웨어와 맞지 않아, probe에서 비일관성 DMA 장치로 명시했습니다. DMA가 읽는 source는 `DMA_TO_DEVICE`, 쓰고 읽는 destination은 `DMA_BIDIRECTIONAL`로 각 전송에 맞춰 매핑합니다. 읽기만 한 canvas를 복사 후 무효화하던 처리를 제거했습니다. 폭이 좁고 stride가 긴 사각형은 실제 행만 동기화해 사이에 있는 다른 픽셀의 캐시를 보존합니다.
+
+새 DT에서는 2D-DMA RX0 완료 인터럽트(SoC source 105 → Hart 1 CLIC slot 41)를 사용합니다. 동기 ioctl이 완료를 기다리는 동안 프로세스는 잠들고 다른 작업이나 idle이 실행될 수 있습니다. IRQ가 없는 이전 DT에서는 polling 방식으로 호환 동작합니다. 완료 신호뿐 아니라 실제 픽셀과 주변 영역 보존도 검사합니다.
 
 ## 메모리와 다른 장치
 
@@ -48,7 +53,7 @@ ppa-test --stats
 cat /var/log/korvo-ui.log
 ```
 
-`LV_USE_SYSMON=1`, `LV_USE_PERF_MONITOR=1`, `LV_USE_PERF_MONITOR_LOG_MODE=0`으로 빌드했습니다. 화면 오른쪽 아래 FPS와 CPU 표시가 나타납니다. CPU 값은 LVGL timer의 busy/idle 계측으로 계산되며 Linux 전체 시스템의 CPU 사용률과 같지 않습니다. 패널의 물리 주사율도 LVGL FPS와 다른 값입니다.
+`LV_USE_SYSMON=1`, `LV_USE_PERF_MONITOR=1`, `LV_USE_PERF_MONITOR_LOG_MODE=0`으로 빌드했습니다. 화면 오른쪽 아래 FPS와 CPU 표시가 나타납니다. Linux에서는 `LV_SYSMON_GET_IDLE=korvo_linux_cpu_idle`로 `/proc/stat`의 실제 CPU 시간 변화량을 사용합니다. idle과 iowait는 CPU 실행 시간에서 제외합니다. 이전 LVGL timer 기반 CPU 값은 DMA 완료 대기와 페이지 읽기 대기도 busy로 계산했습니다. FPS는 계속 LVGL 갱신 계측값이며, 패널의 물리 주사율과 구분해야 합니다. I/O를 기다리며 느린 경우 CPU 값이 낮게 나올 수 있으므로 CPU 수치만으로 반응 속도를 판단하지 않습니다.
 
 ![실제 framebuffer에서 캡처한 DIRECT 메뉴와 오른쪽 아래 성능 표시](images/korvo-lvgl-ppa-menu.png)
 
@@ -84,6 +89,58 @@ ppa-test --stats
 
 DIRECT 음악 실행 동안 실제 하드웨어 명령은 `fill=78`, `flush=78`, `blend=81`, `errors=0`이었습니다. 따라서 화면 복사뿐 아니라 합성 경로도 사용됐음을 확인했습니다.
 
+## 스크롤과 슬라이더 CPU 부하 수정
+
+커널 `#7`부터 RX0 완료 인터럽트와 방향에 맞는 캐시 동기화를 사용합니다. 작은 둥근 제어·투명 배경은 A8 합성을 사용하고, 넓은 불투명 제어는 중앙부의 픽셀별 마스크 계산을 제거합니다. 짧고 넓은 중앙부를 캐시 안에서 단순 채우기 하는 편이 빠르면 CPU를 사용하므로 모든 작은 작업을 무조건 가속기로 보내지는 않습니다.
+
+LVGL 코어의 선택적 weak hook(`0002-linux-scroll-reuse-hook.patch`)은 일반 포트의 동작을 유지하면서 Linux 포트에 스크롤 재사용 기회를 줍니다. 한 프레임 사이에 들어온 여러 이동량을 합쳐, 다음 refresh 시작 때 이전 framebuffer의 겹치는 부분을 canvas로 **2D-DMA 한 번으로 복사**합니다. 소스와 목적지는 다른 버퍼이므로 DMA의 겹친 메모리 복사 동작에 의존하지 않습니다. 홀수 열만 CPU로 처리합니다. 새로 노출된 띠·고정 테두리를 렌더링한 뒤 변경 사각형을 합쳐 한 번 전송합니다. 별도 전체 화면 RAM 버퍼는 추가하지 않습니다.
+
+다음 조건을 만족할 때만 재사용합니다.
+
+- 단색 배경 또는 단색 조상 배경이 비치는 투명 컨테이너이며 변환·레이어 투명도·특수 blend가 없습니다. 투명 영역 뒤에 다른 내용이 겹치면 재사용하지 않습니다.
+- 가시 영역 안에서 작은 정수 픽셀 이동이며, 부모의 clip 및 둥근 모서리 안쪽을 사용합니다.
+- 고정 자식과 사용자 정의 draw callback은 경계와 이동 잔상을 다시 그립니다. 이 영역이 재사용 영역의 절반을 넘거나 24개를 넘으면 전체 재렌더링합니다. 조상 배경의 사용자 그리기나 중앙 overlay 등 안전성을 보장할 수 없는 경우도 전체 재렌더링합니다.
+- 복사할 영역에 아직 그리지 않은 내용·스타일 변경이 없습니다. 변경이 있으면 해당 프레임은 전체 재렌더링합니다.
+
+따라서 gradient 배경, 스크롤 위치에 따라 모양이 바뀌는 효과, 지속적으로 갱신되는 복잡한 장면은 기존 렌더링을 사용할 수 있습니다. `KORVO_SCROLL_DISABLE=1`로 픽셀 재사용만 끄고 비교할 수 있습니다. 드라이버가 이전 버전이면 캐시 가능한 canvas의 순서 보장 `memmove`로 호환 동작합니다.
+
+`widgets`의 탭 페이지는 배경 opacity가 0이고, Tabview의 내부 callback이 원래 모든 이벤트에 등록되어 있었습니다. `0003-tabview-register-handled-events.patch`는 실제로 처리하는 `LAYOUT_CHANGED`와 `SCROLL_END`만 등록합니다. 탐색 동작을 유지하면서 draw callback과 구분할 수 있게 했습니다. 실제 Goodix evdev 경로로 widgets 페이지를 위아래로 드래그하여 스크롤 요청 32회를 병합하고 7회의 픽셀 재사용을 확인했습니다. 내용/스타일이 바뀐 프레임은 전체 렌더링으로 전환했습니다.
+
+같은 커널·드라이버에서 이전 렌더러(`023a194e`)와 수정 렌더러를 세 번 교차 실행한 90단계 검사 결과입니다. SSH를 끊고 UART에서 실행했으며 성능 오버레이는 숨겼습니다. CPU는 표시 문자열이 아닌 `getrusage`의 실제 프로세스 user+system 시간입니다.
+
+| 검사 | 이전 CPU 시간 중앙값 | 수정 CPU 시간 중앙값 | 감소 | 경과 시간 중앙값 |
+|---|---:|---:|---:|---|
+| 슬라이더 | 581ms | 297ms | 약 49% | 약 3.0초 → 3.0초 (30Hz 상한 유지) |
+| 스크롤 | 2,835ms | 1,351ms | 약 52% | 3.66초 → 3.03초 (약 25 → 30회/초) |
+
+이 표는 **공통으로 수정된 드라이버 위에서 렌더러 변경을 비교한 값**입니다. 이전 드라이버의 busy-poll/cache 수정 효과까지 더한 수치는 아닙니다. 90단계 중 첫 위치는 그대로이므로 실제 이동은 89회입니다. 메모리가 부족하거나 장면의 구성이 달라지면 결과도 달라집니다. [세 번의 원시 측정값과 검증 기록](../tests/results/interaction-2026-11-19.md)을 함께 제공합니다.
+
+재현 도구는 WSL에서 다음처럼 빌드합니다.
+
+```sh
+bash tests/build-interaction-bench.sh
+# 같은 검사 코드에 이전 렌더러를 연결한 비교 실행 파일
+bash tests/build-interaction-bench.sh "$HOME/esp32-s31-linux-reference/build/br-output-korvo1" 023a194e
+```
+
+출력된 실행 파일을 보드에 복사하고 GUI를 멈춘 뒤 실행합니다. CPU 측정 동안 SSH를 유지하면 추가 프로세스의 RAM 때문에 swap/page-in이 증가할 수 있습니다.
+
+```sh
+/etc/init.d/S97lvgl-music-demo stop
+KORVO_UI_STATS=1 ./interaction-bench slider 90
+KORVO_UI_STATS=1 ./interaction-bench scroll 90
+KORVO_UI_STATS=1 ./interaction-bench scroll-x 90
+/etc/init.d/S97lvgl-music-demo start
+```
+
+`KORVO_PPA_PROFILE=1`은 SW task 종류별 시간과 가속기 호출 시간을 기록하는 진단용 옵션입니다. 기본 실행에는 이 계측을 하지 않습니다. `KORVO_PPA_FLUSH_ONLY=1`은 draw unit을 끄고 DMA2D 화면 전송만 유지하는 비교 옵션입니다.
+
+`tests/check-scroll-reuse.sh`는 같은 실행 파일에서 재사용을 켜고 끈 화면을 비교합니다. 세로·가로 이동과 방향 반전, 내용 변경, 여러 입력의 병합, 투명 컨테이너·Tabview·사용자 그리기·고정 자식 및 overlay·gradient의 fallback을 검사하며 모든 캡처의 **384,000픽셀이 정확히 일치**해야 통과합니다. 지원 장면에서 실제 재사용이 일어났는지도 확인합니다. 비교가 끝난 임시 캡처는 삭제하고 실패한 캡처는 남깁니다. 보존하려면 `KORVO_PROOF_KEEP=1`을 설정합니다.
+
+```sh
+sh tests/check-scroll-reuse.sh /root/interaction-bench /root/new-scroll-proof
+```
+
 ## 정확도 검사
 
 ```sh
@@ -92,7 +149,7 @@ ppa-test
 /etc/init.d/S97lvgl-music-demo start
 ```
 
-`ppa-test`는 stride/crop 복사, RGB565 5색 채우기, 고정 alpha와 픽셀 alpha 합성, 범위 초과 요청 거부를 검사합니다. CPU로 만든 기준값과 픽셀을 비교하며 대상 사각형 밖의 보존도 확인합니다. 기본 검사는 LCD 내용을 바꾸지 않습니다. GUI 실행 중에는 전용 workspace 소유권 때문에 `EBUSY`가 정상이며 `--stats`는 동시 실행 가능합니다.
+`ppa-test`는 stride/crop 복사, 좁은 사각형의 캐시 동기화, 홀수/짝수 X 좌표의 framebuffer 재사용, RGB565 5색 채우기, 고정 alpha·ARGB8888·A8 합성, 범위 초과 요청 거부를 검사합니다. CPU로 만든 기준값과 픽셀을 비교하며 대상 사각형 밖의 보존도 확인합니다. 기본 검사는 LCD 내용을 바꾸지 않습니다. GUI 실행 중에는 전용 workspace 소유권 때문에 `EBUSY`가 정상이며 `--stats`는 동시 실행 가능합니다.
 
 `tests/ppa-lvgl-scene.c`는 실제 LVGL draw dispatch와 flush까지 검사하는 고정 장면입니다. 대상 toolchain으로 `korvo_ppa_lvgl.c`와 함께 빌드하고 LVGL/ThorVG 라이브러리를 링크합니다. GUI를 멈춘 뒤 소프트웨어와 하드웨어로 각각 실행해 캡처합니다.
 
@@ -100,6 +157,8 @@ ppa-test
 KORVO_PPA_DISABLE=1 ./ppa-lvgl-scene /root/ppa-sw.rgb565
 ./ppa-lvgl-scene /root/ppa-hw.rgb565
 ```
+
+`KORVO_PPA_DEVICE_TEST=1 ./ppa-lvgl-scene /root/ppa-hw.rgb565`는 장면을 유지한 상태에서 `ppa-test`도 실행합니다. 이를 통해 균일한 콘솔 배경 대신 무늬가 있는 실제 framebuffer를 소스로 사용하여 재사용 복사를 검사할 수 있습니다.
 
 파일을 호스트로 가져와 비교합니다.
 

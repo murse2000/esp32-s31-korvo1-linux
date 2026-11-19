@@ -64,6 +64,10 @@ int main(int argc, char **argv)
     lv_obj_t *clip = box(screen, 20, 330, 80, 52, 0x123456, 0);
     lv_obj_t *im = lv_image_create(clip);
     lv_image_set_src(im, &images[0]); lv_obj_set_pos(im, -10, -6);
+    lv_obj_t *translucent = box(screen, 350, 330, 200, 60, 0x1234ff, 18);
+    lv_obj_set_style_bg_opa(translucent, 128, 0);
+    translucent = box(screen, 677, 120, 79, 55, 0xe0a040, 9);
+    lv_obj_set_style_bg_opa(translucent, 170, 0);
     lv_obj_t *label = lv_label_create(screen);
     lv_label_set_text(label, "Native 800x480: fill / rounded / gradient / RGB565 / ARGB alpha / clipped image");
     lv_obj_set_width(label, 740); lv_obj_set_pos(label, 20, 420);
@@ -76,5 +80,9 @@ int main(int argc, char **argv)
         if(read(fd, row, sizeof(row)) != sizeof(row) || fwrite(row, 1, sizeof(row), out) != sizeof(row)) return 1;
     }
     close(fd); fclose(out); lv_deinit();
+    /* Keep KD_GRAPHICS until the diagnostic has checked the patterned RGB565
+     * image, including odd source X, rather than a uniform console background.
+     */
+    if(getenv("KORVO_PPA_DEVICE_TEST") && system("/usr/bin/ppa-test")) return 1;
     return 0;
 }

@@ -12,6 +12,8 @@ for index, (sw, hw) in enumerate(zip(a, b)):
         continue
     x, y = index % 800, index // 800
     alpha_region = 230 <= y < 294 and any(left <= x < left + 96 for left in (170, 320, 470))
+    alpha_region |= (350 <= x < 550 and 330 <= y < 390) or (677 <= x < 756 and 120 <= y < 175)
+    alpha_region |= (350 <= x < 374 or 626 <= x < 650) and (20 <= y < 44 or 76 <= y < 100)
     channels = ((sw >> 11, hw >> 11), ((sw >> 5) & 63, (hw >> 5) & 63), (sw & 31, hw & 31))
     if not alpha_region or any(abs(s - h) > 1 for s, h in channels):
         raise SystemExit(f'FAIL at ({x},{y}): software={sw:04x}, PPA={hw:04x}')

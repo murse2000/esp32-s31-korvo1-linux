@@ -10,8 +10,12 @@
 #define KORVO_PPA_FILL 2U
 #define KORVO_PPA_FLUSH 3U
 #define KORVO_PPA_BLEND 4U
+#define KORVO_PPA_REUSE 5U
 #define KORVO_PPA_RGB565 0U
 #define KORVO_PPA_ARGB8888 1U
+#define KORVO_PPA_A8 2U
+#define KORVO_PPA_CAP_A8 (1U << 8)
+#define KORVO_PPA_CAP_IRQ (1U << 9)
 struct korvo_ppa_info {
     __u32 abi, buffer_size, buffers, capabilities;
     __u32 screen_width, screen_height, render_buffer_size, reserved;

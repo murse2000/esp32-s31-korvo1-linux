@@ -1,0 +1,31 @@
+From: Korvo Linux project
+Subject: [PATCH] core: allow the Linux port to reuse unchanged scroll pixels
+
+The optional weak hook preserves the normal invalidation path for all other
+ports and for scenes the Linux port cannot safely reuse.
+
+--- a/src/core/lv_obj_scroll.c
++++ b/src/core/lv_obj_scroll.c
+@@ -410,6 +410,10 @@ void lv_obj_scroll_to_view_recursive(lv_obj_t * obj, lv_anim_enable_t anim_en)
+     }
+ }
+ 
++#ifdef __linux__
++extern bool korvo_lvgl_scroll(lv_obj_t *, int32_t, int32_t) __attribute__((weak));
++#endif
++
+ lv_result_t lv_obj_scroll_by_raw(lv_obj_t * obj, int32_t x, int32_t y)
+ {
+     if(x == 0 && y == 0) return LV_RESULT_OK;
+@@ -422,7 +426,11 @@ lv_result_t lv_obj_scroll_by_raw(lv_obj_t * obj, int32_t x, int32_t y)
+     lv_obj_move_children_by(obj, x, y, true);
+     lv_result_t res = lv_obj_send_event(obj, LV_EVENT_SCROLL, NULL);
+     if(res != LV_RESULT_OK) return res;
++#ifdef __linux__
++    if(!korvo_lvgl_scroll || !korvo_lvgl_scroll(obj, x, y)) lv_obj_invalidate(obj);
++#else
+     lv_obj_invalidate(obj);
++#endif
+     return LV_RESULT_OK;
+ }
+ 

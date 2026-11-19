@@ -42,6 +42,8 @@
 		compatible = "espressif,esp32s31-ppa";
 		reg = <0x20345000 0x1000>, <0x20346000 0x1000>;
 		reg-names = "ppa", "dma2d";
+		interrupt-parent = <&clic>;
+		interrupts = <41 105 IRQ_TYPE_LEVEL_HIGH>;
 		memory-region = <&ppa_descriptors>;
 		espressif,canvas-memory = <&ppa_canvas>;
 		dma-noncoherent;

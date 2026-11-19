@@ -59,6 +59,18 @@ After deployment, the queued-touch integration passed widgets/HOME and audio/HOM
 
 Raw clock registers decoded to PCLK 17,999,004Hz, Htotal 928, Vtotal 548, negative pixel edge. This matches the official BSP's 18MHz timing and implies approximately 35.39Hz scanout. No LCD overclock was applied.
 
+### Scroll and slider CPU correction (2026-11-19)
+
+Starting with kernel `#7`, DMA2D RX0 completion source 105 is routed to Hart 1 CLIC slot 41. The driver sleeps on a completion instead of busy-polling and uses directional DMA mappings with rectangle cache synchronization. Narrow transfers avoid invalidating unrelated columns. New tests passed narrow strided copies, even/odd framebuffer-source reuse, A8/RGB565/ARGB8888 blends, five fill colors and invalid bounds; the hardware error counter stayed zero.
+
+The LVGL port now reuses the previous framebuffer's overlapping scroll region through DMA2D, redraws exposed strips and fixed/custom regions, and combines frame flushes. Transparent containers over a safe solid ancestor are supported, including the widgets Tabview page; unsafe backgrounds, overlapping content or changing source content fall back to full redraw. Small rounded controls use A8 blending, while appropriate opaque interiors use a simple cached fill. The CPU monitor now reports Linux `/proc/stat` activity rather than counting DMA waits as busy time.
+
+Three paired runs against renderer `023a194e` on the same corrected driver measured median process CPU time reductions of approximately 52% for scrolling and 49% for sliders. Native 800×480 RGB565 and the 18MHz LCD timing are retained. These are bounded synthetic scenes, not a guarantee for every demo. [Full conditions and all raw runs](../tests/results/interaction-2026-11-19.md) are published.
+
+All ten framebuffer comparisons passed with zero pixel differences: vertical/horizontal scrolling, changed content, coalesced input, transparent containers, Tabview, custom drawing, floating children, overlay fallback and gradient fallback. Actual Goodix drag input in `widgets` also exercised reuse. The separate pure-SW/PPA scene matched all opaque pixels; 10,736 alpha pixels stayed within one RGB565 step per channel.
+
+The final published image was flashed at 921600 baud and booted as kernel `#11` (2026-11-19 12:45 KST). Wi-Fi automatically reconnected to 192.168.1.37, the menu started with the normal CPU monitor and no extra task profiler, and native framebuffer scanout remained active. Installed PPA module, GUI, music player and diagnostic-tool SHA-256 hashes match the Buildroot target. DMA2D completion interrupts incremented with capabilities `0x33e` and zero hardware errors; ES8389 remained registered.
+
 ### Audio verification commands
 
 Run on the board's Linux shell:

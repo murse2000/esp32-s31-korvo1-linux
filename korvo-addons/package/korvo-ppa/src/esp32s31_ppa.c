@@ -5,6 +5,8 @@
  */
 #include <linux/dma-mapping.h>
 #include <linux/dma-map-ops.h>
+#include <linux/completion.h>
+#include <linux/interrupt.h>
 #include <linux/fs.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
@@ -52,8 +54,25 @@ struct s31ppa {
     struct mutex lock;
     struct file *owner;
     struct korvo_ppa_stats stats;
+    struct completion done;
+    int irq;
+    u32 irq_status;
 };
 static struct platform_device *fallback_device;
+static bool sparse_sync = true;
+module_param(sparse_sync, bool, 0644);
+MODULE_PARM_DESC(sparse_sync, "Synchronize narrow DMA rectangles one row at a time");
+static irqreturn_t ppa_irq(int irq, void *data)
+{
+    struct s31ppa *p = data;
+    u32 status = readl(p->dma + IN(0) + RAW);
+    if (!(status & GENMASK(4, 1))) return IRQ_NONE;
+    writel(0, p->dma + IN(0) + ENA);
+    writel(status, p->dma + IN(0) + CLR);
+    WRITE_ONCE(p->irq_status, status);
+    complete(&p->done);
+    return IRQ_HANDLED;
+}
 
 static void clock_enable(struct s31ppa *p)
 {
@@ -90,6 +109,7 @@ static void channel(struct s31ppa *p, bool input, unsigned int ch,
     writel((7 << 3) | (input ? 1 : 2), p->dma + base + (input ? 0x4c : 0x48));
     writel(peripheral, p->dma + base + (input ? IN_PERI : OUT_PERI));
     writel(p->desc_address + descriptor, p->dma + base + ADDR);
+    if (input && p->irq > 0) writel(GENMASK(4, 1), p->dma + base + ENA);
 }
 static void descriptor(struct s31ppa *p, unsigned int offset, u32 address,
                         u32 picture_w, u32 picture_h, u32 x, u32 y,
@@ -109,11 +129,18 @@ static int finish(struct s31ppa *p)
      * a full 10ms scheduler tick on this kernel, once per draw operation.
      * Poll briefly, then yield only for an unusually long transfer.
      */
-    int ret = readl_poll_timeout(p->dma + IN(0) + RAW, status,
-                               status & GENMASK(4, 1), 0, 2000);
-    if (ret) ret = readl_poll_timeout(p->dma + IN(0) + RAW, status,
-                                     status & GENMASK(4, 1), 10, 20000);
-    if (!ret && !(status & BIT(1))) ret = -EIO;
+    int ret;
+    if (p->irq > 0) {
+        ret = wait_for_completion_timeout(&p->done, msecs_to_jiffies(100)) ? 0 : -ETIMEDOUT;
+        status = READ_ONCE(p->irq_status);
+        writel(0, p->dma + IN(0) + ENA);
+    } else {
+        ret = readl_poll_timeout(p->dma + IN(0) + RAW, status,
+                                status & GENMASK(4, 1), 0, 2000);
+        if (ret) ret = readl_poll_timeout(p->dma + IN(0) + RAW, status,
+                                         status & GENMASK(4, 1), 10, 20000);
+    }
+    if (!ret && (!(status & BIT(1)) || (status & GENMASK(4, 2)))) ret = -EIO;
     if (ret) {
         dev_err_ratelimited(p->dev, "2D transfer failed %d RX=%08x TX=%08x AXI=%08x\n",
                            ret, status, readl(p->dma + OUT(0) + RAW), readl(p->dma + 0xa00));
@@ -148,40 +175,70 @@ static u32 expand_rgb565(u32 color)
            (((g << 2) | (g >> 4)) << 8) | (b << 3) | (b >> 2);
 }
 static void sync_surface(struct s31ppa *p, const struct korvo_ppa_surface *s,
+                         dma_addr_t address, enum dma_data_direction direction,
                          u32 x, u32 y, u32 w, u32 h, u32 bytes, bool device)
 {
     unsigned int offset = s->offset + (y * s->width + x) * bytes;
     unsigned int length = ((h - 1) * s->width + w) * bytes;
-    if(device) dma_sync_single_range_for_device(p->dev, p->address[s->buffer],
-                                                offset, length, DMA_BIDIRECTIONAL);
-    else dma_sync_single_range_for_cpu(p->dev, p->address[s->buffer],
-                                        offset, length, DMA_BIDIRECTIONAL);
+    unsigned int rows = 1, step = 0;
+    if (!device && direction == DMA_TO_DEVICE) return;
+    if (sparse_sync && w * bytes <= 128 && s->width * bytes >= w * bytes + 256 && h > 1) {
+        rows = h; step = s->width * bytes; length = w * bytes;
+    }
+    while (rows--) {
+        if(device) dma_sync_single_range_for_device(p->dev, address, offset, length, direction);
+        else dma_sync_single_range_for_cpu(p->dev, address, offset, length, direction);
+        offset += step;
+    }
 }
 static int run(struct s31ppa *p, const struct korvo_ppa_request *q)
 {
-    u32 src = 0, dst, src_bytes = q->format == KORVO_PPA_ARGB8888 ? 4 : 2;
+    u32 src = 0, dst, src_bytes = q->format == KORVO_PPA_ARGB8888 ? 4 :
+                                q->format == KORVO_PPA_A8 ? 1 : 2;
+    dma_addr_t src_dma = 0, dst_dma = 0;
     int ret;
     u64 start;
     bool fill = q->operation == KORVO_PPA_FILL;
     bool flush = q->operation == KORVO_PPA_FLUSH;
     bool blend = q->operation == KORVO_PPA_BLEND;
-    if (q->operation != KORVO_PPA_COPY && !fill && !flush && !blend) return -EOPNOTSUPP;
-    if (q->format > KORVO_PPA_ARGB8888 || (q->format && !blend) || q->alpha > 255)
+    bool reuse = q->operation == KORVO_PPA_REUSE;
+    if (q->operation != KORVO_PPA_COPY && !fill && !flush && !blend && !reuse) return -EOPNOTSUPP;
+    if (q->format > KORVO_PPA_A8 || (q->format && !blend) || q->alpha > 255)
         return -EOPNOTSUPP;
     /* DMA2D RX needs complete 32-bit writes. Clients fall back for odd edges. */
     if ((q->destination.width | q->destination_x | q->width) & 1) return -EINVAL;
     if ((ret = surface(p, &q->destination, q->destination_x, q->destination_y,
                        q->width, q->height, 2, flush, &dst))) return ret;
     if (q->destination.buffer == KORVO_PPA_FRAMEBUFFER && !flush) return -EINVAL;
+    if (reuse && (q->source.buffer != KORVO_PPA_FRAMEBUFFER || q->destination.buffer != 0)) return -EINVAL;
     if (!fill && (ret = surface(p, &q->source, q->source_x, q->source_y,
-                                q->width, q->height, src_bytes, false, &src))) return ret;
+                                q->width, q->height, src_bytes, reuse, &src))) return ret;
     if (!fill && q->source.buffer == q->destination.buffer) return -EINVAL;
     start = ktime_get_ns();
-    if (!fill) sync_surface(p, &q->source, q->source_x, q->source_y,
-                            q->width, q->height, src_bytes, true);
-    if (q->destination.buffer < 2)
-        sync_surface(p, &q->destination, q->destination_x, q->destination_y,
-                      q->width, q->height, 2, true);
+    /* Map each role with its actual direction. Returning a read-only source
+     * to the CPU must not invalidate the just-rendered canvas cache.
+     * Explicit rectangle sync avoids touching the entire mapped canvas.
+     */
+    if (!fill && !reuse) {
+        src_dma = dma_map_single_attrs(p->dev, p->buffer[q->source.buffer],
+            p->buffer_size[q->source.buffer], DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+        if (dma_mapping_error(p->dev, src_dma)) return -EIO;
+        src = src_dma + q->source.offset;
+        sync_surface(p, &q->source, src_dma, DMA_TO_DEVICE, q->source_x, q->source_y,
+                     q->width, q->height, src_bytes, true);
+    }
+    if (q->destination.buffer < 2) {
+        dst_dma = dma_map_single_attrs(p->dev, p->buffer[q->destination.buffer],
+            p->buffer_size[q->destination.buffer], DMA_BIDIRECTIONAL, DMA_ATTR_SKIP_CPU_SYNC);
+        if (dma_mapping_error(p->dev, dst_dma)) {
+            ret = -EIO; goto unmap_source;
+        }
+        dst = dst_dma + q->destination.offset;
+        sync_surface(p, &q->destination, dst_dma, DMA_BIDIRECTIONAL,
+                     q->destination_x, q->destination_y, q->width, q->height, 2, true);
+    }
+    reinit_completion(&p->done);
+    WRITE_ONCE(p->irq_status, 0);
     descriptor(p, DESC_RX, dst, q->destination.width, q->destination.height,
                q->destination_x, q->destination_y, q->width, q->height, 3);
     if (fill || blend) {
@@ -190,15 +247,17 @@ static int run(struct s31ppa *p, const struct korvo_ppa_request *q)
         channel(p, true, 0, 2, false, DESC_RX);
         writel(0, p->ppa + 0x2c);
         if (blend) {
-            u32 fg_mode = q->format == KORVO_PPA_ARGB8888 ? 0 : 2;
-            u32 fg_alpha_mode = q->format == KORVO_PPA_ARGB8888 ? (q->alpha == 255 ? 0 : 2) : 1;
+            u32 fg_mode = q->format == KORVO_PPA_ARGB8888 ? 0 : q->format == KORVO_PPA_A8 ? 6 : 2;
+            u32 fg_alpha_mode = q->format != KORVO_PPA_RGB565 ? (q->alpha == 255 ? 0 : 2) : 1;
             descriptor(p, DESC_TX, dst, q->destination.width, q->destination.height,
                        q->destination_x, q->destination_y, q->width, q->height, 3);
             descriptor(p, DESC_FG, src, q->source.width, q->source.height,
-                       q->source_x, q->source_y, q->width, q->height, src_bytes == 4 ? 5 : 3);
+                       q->source_x, q->source_y, q->width, q->height,
+                       src_bytes == 4 ? 5 : src_bytes == 1 ? 1 : 3);
             channel(p, false, 0, 2, false, DESC_TX);
             channel(p, false, 1, 3, false, DESC_FG);
             writel(2 | (fg_mode << 4) | (2 << 8), p->ppa + 0x24);
+            writel(expand_rgb565(q->color) & 0xffffff, p->ppa + 0x48);
             writel(255 | (q->alpha << 8) | BIT(16) | (fg_alpha_mode << 18), p->ppa + 0x40);
             /* Empty color-key ranges: all pixels use normal alpha blending. */
             writel(0xffffff, p->ppa + 0x50); writel(0, p->ppa + 0x54);
@@ -228,10 +287,14 @@ static int run(struct s31ppa *p, const struct korvo_ppa_request *q)
     }
     ret = finish(p);
     if (q->destination.buffer < 2)
-        sync_surface(p, &q->destination, q->destination_x, q->destination_y,
-                      q->width, q->height, 2, false);
-    if (!fill) sync_surface(p, &q->source, q->source_x, q->source_y,
-                            q->width, q->height, src_bytes, false);
+        sync_surface(p, &q->destination, dst_dma, DMA_BIDIRECTIONAL,
+                     q->destination_x, q->destination_y, q->width, q->height, 2, false);
+    if (q->destination.buffer < 2)
+        dma_unmap_single_attrs(p->dev, dst_dma, p->buffer_size[q->destination.buffer],
+                               DMA_BIDIRECTIONAL, DMA_ATTR_SKIP_CPU_SYNC);
+unmap_source:
+    if (!fill && !reuse) dma_unmap_single_attrs(p->dev, src_dma, p->buffer_size[q->source.buffer],
+                                     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
     p->stats.nanoseconds += ktime_get_ns() - start;
     if (!ret) {
         if (fill) p->stats.fills++;
@@ -257,7 +320,8 @@ static long ppa_ioctl(struct file *file, unsigned int command, unsigned long arg
     if (command == KORVO_PPA_IOC_INFO) {
         struct korvo_ppa_info info = {KORVO_PPA_ABI, KORVO_PPA_BUFFER_SIZE, 2,
             BIT(KORVO_PPA_COPY) | BIT(KORVO_PPA_FILL) | BIT(KORVO_PPA_FLUSH) |
-            BIT(KORVO_PPA_BLEND), 800, 480, p->buffer_size[0], 0};
+            BIT(KORVO_PPA_BLEND) | BIT(KORVO_PPA_REUSE) | KORVO_PPA_CAP_A8 | (p->irq > 0 ? KORVO_PPA_CAP_IRQ : 0),
+            800, 480, p->buffer_size[0], 0};
         return copy_to_user(user, &info, sizeof(info)) ? -EFAULT : 0;
     }
     if (command == KORVO_PPA_IOC_STATS) {
@@ -287,8 +351,6 @@ static int ppa_mmap(struct file *file, struct vm_area_struct *vma)
     mutex_lock(&p->lock);
     ret = claim(p, file);
     if (!ret) {
-        dma_sync_single_for_cpu(p->dev, p->address[index],
-                                p->buffer_size[index], DMA_BIDIRECTIONAL);
         vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
         ret = remap_pfn_range(vma, vma->vm_start, virt_to_phys(p->buffer[index]) >> PAGE_SHIFT,
                              length, vma->vm_page_prot);
@@ -313,7 +375,6 @@ static void buffers_free(void *data)
     struct s31ppa *p = data;
     int i;
     for (i = 0; i < 2; i++) if (p->buffer[i]) {
-        dma_unmap_single(p->dev, p->address[i], p->buffer_size[i], DMA_BIDIRECTIONAL);
         if (i || !p->reserved_canvas)
             free_pages((unsigned long)p->buffer[i], get_order(p->buffer_size[i]));
     }
@@ -336,6 +397,7 @@ static int ppa_probe(struct platform_device *pdev)
         p->desc_address = mem.start;
     }
     mutex_init(&p->lock);
+    init_completion(&p->done);
     /* Non-OF platform devices otherwise inherit coherent=true on RISC-V.
      * PPA and 2D-DMA are not coherent with the S31 D-cache.
      */
@@ -367,24 +429,25 @@ static int ppa_probe(struct platform_device *pdev)
         if (!buffer) buffer = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO,
                                                        get_order(p->buffer_size[i]));
         if (!buffer) { ret = -ENOMEM; goto free_buffers; }
-        p->address[i] = dma_map_single(p->dev, buffer, p->buffer_size[i], DMA_BIDIRECTIONAL);
-        if (dma_mapping_error(p->dev, p->address[i])) {
-            if (i || !p->reserved_canvas) free_pages((unsigned long)buffer, get_order(p->buffer_size[i]));
-            p->buffer[i] = NULL;
-            ret = -EIO; goto free_buffers;
-        }
+        p->address[i] = virt_to_phys(buffer);
         p->buffer[i] = buffer;
     }
     ret = devm_add_action_or_reset(p->dev, buffers_free, p);
     if (ret) return ret;
     clock_enable(p);
+    p->irq = platform_get_irq_optional(pdev, 0);
+    if (p->irq == -EPROBE_DEFER) return -EPROBE_DEFER;
+    if (p->irq > 0) {
+        ret = devm_request_irq(p->dev, p->irq, ppa_irq, 0, "esp32s31-dma2d", p);
+        if (ret) return ret;
+    }
     p->misc = (struct miscdevice){.minor = MISC_DYNAMIC_MINOR, .name = "esp32s31-ppa",
         .fops = &ppa_fops, .parent = p->dev, .mode = 0600};
     platform_set_drvdata(pdev, p);
     ret = misc_register(&p->misc);
     if (ret) return ret;
-    dev_info(p->dev, "PPA + DMA2D, cached render=%zu scratch=%zu, descriptors %08x\n",
-             p->buffer_size[0], p->buffer_size[1], p->desc_address);
+    dev_info(p->dev, "PPA + DMA2D, cached render=%zu scratch=%zu, descriptors %08x, IRQ=%d\n",
+             p->buffer_size[0], p->buffer_size[1], p->desc_address, p->irq);
     return 0;
 free_buffers:
     buffers_free(p);
