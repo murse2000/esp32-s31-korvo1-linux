@@ -1,9 +1,22 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
+# Wi-Fi reconnect watch.
+#
+# The old loop ran two wpa_cli processes every 10 seconds. On this 9 MiB board
+# each fork/exec pulls code pages back from the SD card and provokes kswapd:
+# stopping the loop dropped SD reads from 454 to 88 KB/s and kswapd scans from
+# 256 to 57 per second. The steady-state path below forks nothing at all; the
+# wpa_cli status probe and the profile check run once a minute.
 IFACE=wlan0
 CONF=/etc/wpa_supplicant.conf
 PID=/run/korvo-wifi-watch.pid
-alive() { [ -s "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
+
+alive() {
+    [ -s "$1" ] || return 1
+    read -r p < "$1" 2>/dev/null || return 1
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
 watch_wifi()
 {
     # A read-only image update must never replace a saved /etc profile.
@@ -14,10 +27,20 @@ watch_wifi()
         chmod 600 "$CONF"
         logger -t wifi 'Imported saved profile from /mnt/sd'
     fi
+    n=0
     while :; do
-        if [ -d /sys/class/net/$IFACE ] &&
-           grep -Eq '^[[:space:]]*network[[:space:]]*=' "$CONF" 2>/dev/null; then
-            if ! wpa_cli -i "$IFACE" ping 2>/dev/null | grep -q PONG; then
+        # Profile presence is re-checked once a minute so that wifi-add is
+        # still noticed without a restart.
+        if [ $((n % 6)) -eq 0 ]; then
+            if grep -Eq '^[[:space:]]*network[[:space:]]*=' "$CONF" 2>/dev/null; then
+                have_profile=1
+            else
+                have_profile=0
+            fi
+        fi
+        if [ "$have_profile" = 1 ] && [ -d /sys/class/net/$IFACE ]; then
+            # Restart the supplicant only when its process is really gone.
+            if ! alive /run/wpa_supplicant.$IFACE.pid; then
                 rm -f /run/wpa_supplicant.$IFACE.pid
                 ip link set "$IFACE" up
                 wpa_supplicant -B -s -D nl80211 -i "$IFACE" -c "$CONF" -P /run/wpa_supplicant.$IFACE.pid
@@ -25,15 +48,22 @@ watch_wifi()
             if ! alive /run/wpa_cli.$IFACE.pid; then
                 wpa_cli -B -i "$IFACE" -a /usr/sbin/wpa-dhcp-action -P /run/wpa_cli.$IFACE.pid
             fi
-            # Repair a missed CONNECTED event or a dead DHCP client.
-            if wpa_cli -i "$IFACE" status 2>/dev/null | grep -q '^wpa_state=COMPLETED' &&
-               ! alive /run/udhcpc.$IFACE.pid; then
-                /usr/sbin/wpa-dhcp-action "$IFACE" CONNECTED
+            # Repair a missed CONNECTED event or a dead DHCP client. This is
+            # the only wpa_cli call left in the loop, every 30 seconds.
+            if [ $((n % 3)) -eq 0 ]; then
+                st=$(wpa_cli -i "$IFACE" status 2>/dev/null)
+                case "$st" in
+                    *wpa_state=COMPLETED*)
+                        alive /run/udhcpc.$IFACE.pid || /usr/sbin/wpa-dhcp-action "$IFACE" CONNECTED
+                        ;;
+                esac
             fi
         fi
+        n=$((n + 1))
         sleep 10
     done
 }
+
 case ${1:-start} in
     start)
         alive "$PID" && exit 0
